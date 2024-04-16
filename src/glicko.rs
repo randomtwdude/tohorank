@@ -87,7 +87,6 @@ pub fn calc_new_volatility(v: &f64, d: &f64, sig: &f64, phi: &f64, tau: &f64, ep
         } else {
             fa /= 2.0;
         }
-
         big_b = big_c;
         fb = fc;
     }

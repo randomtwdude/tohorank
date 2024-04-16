@@ -54,7 +54,7 @@ pub enum Tags {
 
 impl Tags {
 	// Names of groups (touhou works and stages)
-	fn name(&self) -> &'static str {
+	pub fn name(&self) -> &'static str {
 		match *self {
 			Tags::book	=> "Books and CDs",
 			Tags::HRtP	=> "The Highly Responsive to Prayers",
@@ -97,7 +97,7 @@ impl Tags {
 		}
 	}
 	// Touhou game titles.
-	fn exname(&self) -> &'static str {
+	pub fn exname(&self) -> &'static str {
 		match *self {
 			Tags::book	=> "",
 			Tags::HRtP	=> "01 - Reiiden",

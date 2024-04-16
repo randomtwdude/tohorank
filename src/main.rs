@@ -8,7 +8,6 @@ use std::time::SystemTime;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{self, BufRead, BufReader, Write, BufWriter};
 use std::str::FromStr;
-use rand::thread_rng;
 use serde::{Serialize, Deserialize};
 use colored::Colorize;
 use rustyline::error::ReadlineError;
@@ -58,11 +57,6 @@ struct Chara {
 }
 
 impl Chara {
-    // construct
-    fn new(name: String, rank: Glicko, hist: Past, recent: VecDeque<Match>, groups: HashSet<Tags>, flags: [bool; 4])
-    -> Result<Self> {
-        Ok(Chara { name, rank, hist, recent, groups, flags })
-    }
     // queries
     fn is_pc98(&self) -> bool {
         self.flags[0]
@@ -256,32 +250,91 @@ fn fight(records: &mut Vec<Match>, fire: &mut Chara, ice: &mut Chara, fire_id: u
     }
 }
 
-// Updates the history records for each character
-fn update_history(touhous: &mut Vec<Chara>) {
-    // pre-calculates the rank of everyone
-    // because we can't do this in the for-loop below
-    //              -- the Borrow Checker
-    let mut mirror = touhous.clone();
-    mirror.sort_by(|a, b| a.rank.rate.partial_cmp(&b.rank.rate).unwrap());
-    mirror.reverse();
-    // TODO: put a hashmap here i guess
+// Reset a character
+fn reset_chara(chara: &mut Chara) {
+    *chara = Chara {
+        rank: Glicko {
+            rate: 1500.0,
+            devi: 350.0,
+            vola: 0.06,
+        },
+        hist: Past {
+            wins: 0,
+            loss: 0,
+            draw: 0,
+            old_rank: VecDeque::with_capacity(7),
+            old_rate: VecDeque::with_capacity(7),
+        },
+        recent: VecDeque::with_capacity(7),
+        ..chara.clone()
+    };
+}
 
-    // Actually update
-    for th in touhous.iter_mut() {
-        // only keep 7 records
-        if th.hist.old_rank.len() == 7 {
-            th.hist.old_rank.pop_back();
-            th.hist.old_rate.pop_back();
+// Updates the history records for each character
+fn update_history(touhous: &mut Vec<Chara>, records: &Vec<Match>) {
+    // fumos are references to touhous, right
+    let mut fumos: Vec<&mut Chara> = Vec::with_capacity(touhous.len());
+    for fumo in touhous.iter_mut() {
+        fumos.push(fumo);
+    }
+    fumos.sort_by(|a, b| a.rank.rate.partial_cmp(&b.rank.rate).unwrap());
+    fumos.reverse();
+
+    let mut rank = 1;
+    let mut last_rating = fumos[0].rank.rate;
+    for fumo in fumos {
+        // calculate rank
+        if fumo.rank.rate < last_rating {
+            rank += 1;
+            last_rating = fumo.rank.rate;
         }
-        // insert new records
-        th.hist.old_rate.push_front(th.rank.rate);
+        // max 7 historical entries
+        if fumo.hist.old_rank.len() >= 7 {
+            fumo.hist.old_rank.pop_back();
+            fumo.hist.old_rate.pop_back();
+        }
+        fumo.hist.old_rank.push_front(rank);
+        fumo.hist.old_rate.push_front(fumo.rank.rate);
+    }
+
+    // update win/loss/draw and recent battles
+    for battle in records.iter() {
+        // wdl
+        match battle.res {
+            r if r == 2.0 => {
+                touhous[battle.one].hist.loss += 1;
+                touhous[battle.two].hist.loss += 1;
+            },
+            r if r == 1.0 => {
+                touhous[battle.one].hist.wins += 1;
+                touhous[battle.two].hist.loss += 1;
+            },
+            r if r == 0.5 => {
+                touhous[battle.one].hist.draw += 1;
+                touhous[battle.two].hist.draw += 1;
+            },
+            r if r == 0.0 => {
+                touhous[battle.one].hist.loss += 1;
+                touhous[battle.two].hist.wins += 1;
+            },
+            _ => { println!("update_history: ???"); },
+        }
+        // recent battles
+        if touhous[battle.one].recent.len() >= 7 {
+            touhous[battle.one].recent.pop_back();
+        }
+        if touhous[battle.two].recent.len() >= 7 {
+            touhous[battle.two].recent.pop_back();
+        }
+        touhous[battle.one].recent.push_front(battle.clone());
+        touhous[battle.two].recent.push_front(battle.clone());
     }
 }
 
 // Updates all ratings, write_data() after use.
 fn glicko_calc(touhous: &mut Vec<Chara>, records: &Vec<Match>) {
     println!("Tallying {} matches...", records.len());
-    update_history(touhous);
+    update_history(touhous, records);
 
     // transform to the glicko-2 scale
     for th in touhous.iter_mut() {
@@ -416,11 +469,21 @@ fn find(touhous: &Vec<Chara>, query: String) -> Option<&Chara> {
     }
     None
 }
+fn find_mut(touhous: &mut Vec<Chara>, query: String) -> Option<&mut Chara> {
+    for th in touhous.iter_mut() {
+        if th.name.to_lowercase().contains(&query.to_lowercase()) {
+            return Some(th);
+        }
+    }
+    None
+}
 
 // Show detailed stats about a character
-fn stat(chara: &Chara, touhous: &Vec<Chara>) {
+fn stat(chara: &Chara, touhous: &Vec<Chara>, full_rankings: bool) {
     // Name and overall rank
-    let ranking_overall = stats::rank_in_group(chara, touhous);
+    let no_tags: Vec<Tags> = vec![];
+    let everyone = stats::filter_group(&no_tags, touhous);
+    let ranking_overall = stats::rank_in_group(chara, &everyone);
     println!("{0: <45}{1: >13}",
         format!("~~ {} ~~", chara.name.bold()),
         format!("Rank #{}/{}", ranking_overall.0, ranking_overall.1)
@@ -428,9 +491,9 @@ fn stat(chara: &Chara, touhous: &Vec<Chara>) {
     println!("{:-<1$}", "", 50);
 
     // Rating information
-    println!("{} - Glicko-2", "RATING".bold());
+    println!("==> {}", "RATING".bold());
     println!("{}",
-        if chara.rank.devi > 120.0 {
+        if chara.rank.devi > 110.0 {
             format!("    {0:.2} ± {1:.0} | (volatility: {2:.6})",
                 chara.rank.rate,
                 chara.rank.devi,
@@ -444,19 +507,118 @@ fn stat(chara: &Chara, touhous: &Vec<Chara>) {
             ).truecolor(140, 180, 250)
         }
     );
-    if chara.rank.devi > 120.0 {
-        println!("    ⓘ The uncertainty is high, do more battles!");
+    if chara.rank.devi > 110.0 {
+        println!("    ⓘ The uncertainty is high, do more battles!\n");
     }
 
-    println!("\n");
     if !chara.hist.old_rank.is_empty() {
-        println!("    -- Last {} sessions --", chara.hist.old_rank.len());
+        println!("    -- Last {} {} --",
+            chara.hist.old_rank.len(),
+            if chara.hist.old_rank.len() > 1 {
+                "sessions"
+            } else {
+                "session"
+            }
+        );
         let pt_diff = chara.rank.rate - *chara.hist.old_rate.back().unwrap();
         let rk_diff: isize = ranking_overall.0 as isize - *chara.hist.old_rank.back().unwrap() as isize;
-        println!("{:+.0}", pt_diff);
-        println!("{}", -rk_diff);
+        println!("    {} {:.0} {} {}.",
+            if pt_diff > 0.0 {
+                "🡽".blue()
+            } else if pt_diff == 0.0 {
+                "🡺".white()
+            } else {
+                "🡾".red()
+            },
+            pt_diff.abs(),
+            if pt_diff == 1.0 {
+                "point"
+            } else {
+                "points"
+            },
+            if pt_diff >= 0.0 {
+                "gained".blue()
+            } else {
+                "lost".red()
+            }
+        );
+        println!("    {} {} {} {}.",
+            if rk_diff < 0 {
+                "🡽".blue()
+            } else if rk_diff == 0 {
+                "🡺".white()
+            } else {
+                "🡾".red()
+            },
+            rk_diff.abs(),
+            if rk_diff.abs() == 1 {
+                "place"
+            } else {
+                "places"
+            },
+            if rk_diff <= 0 {
+                "gained".blue()
+            } else {
+                "lost".red()
+            }
+        );
     }
 
+    // Rank informations
+    println!("\n==> {}", "RANKINGS".bold());
+    // Overall ranks
+    stats::print_rank_in_group(chara, &no_tags, touhous);
+    // All the other ranks
+    if full_rankings {
+        for tag in chara.groups.iter() {
+            stats::print_rank_in_group(chara, &vec![tag.clone()], touhous);
+        }
+    } else {
+        println!("\n    ⓘ For rankings in various works, use `stat!`");
+    }
+
+    // Stats
+    println!("\n==> {}", "STATISTICS".bold());
+    let total = chara.hist.wins + chara.hist.draw + chara.hist.loss;
+    println!("    Wins:   {} ({}%)",
+        chara.hist.wins,
+        if total == 0 {
+            0
+        } else {
+            100 * chara.hist.wins / total
+        }
+    );
+    println!("    Draws:  {}", chara.hist.draw);
+    println!("    Losses: {}", chara.hist.loss);
+
+    // Recent battles
+    if !chara.recent.is_empty() {
+        println!("\n==> {}", "RECENT BATTLES".bold());
+    }
+    for battle in chara.recent.iter() {
+        let side;
+        if touhous.get(battle.one).unwrap().name == chara.name {
+            side = 1;
+        } else {
+            side = 2;
+        }
+        println!("    {} against {}",
+            match battle.res {
+                r if r == 0.5 => { "Drew".white().bold() },
+                r if r == 2.0 => { "Drew (lost)".red().bold() },
+                r if r == 0.0 && side == 1 => { "Lost".red().bold() },
+                r if r == 0.0 && side == 2 => { "Won".blue().bold() },
+                r if r == 1.0 && side == 1 => { "Won".blue().bold() },
+                r if r == 1.0 && side == 2 => { "Lost".red().bold() },
+                _ => { "?".red().bold() }
+            },
+            if side == 1 {
+                touhous.get(battle.two).unwrap().name.clone()
+            } else {
+                touhous.get(battle.one).unwrap().name.clone()
+            }
+        );
+    }
 }
 
 // Show the current rankings up to *first* entries
@@ -485,15 +647,25 @@ fn list(mut touhous: Vec<Chara>, first: usize) {
             break;
         }
         if touhou.rank.rate < last_rating {
-            rank += 1;
+            rank = count + 1;
             last_rating = touhou.rank.rate;
         }
-        println!("{0: <4} {1: <26}({2} ± {3:.0})  {4:.6}",
+        println!("{0: <4} {1: <26}{2}  {3:.2}",
             format!("{}.", rank),
             touhou.name,
-            format!("{0:.2}", touhou.rank.rate).bold(),
-            touhou.rank.devi * 1.96, // 95% confidence
-            touhou.rank.vola
+            if touhou.rank.devi > 110.0 {
+                format!("({0: <7} ± {1:.0})",
+                    format!("{:.2}", touhou.rank.rate).bold(),
+                    touhou.rank.devi * 1.96
+                ).truecolor(182, 185, 191)
+            } else {
+                format!("({0: <7} ± {1:.0})",
+                    format!("{:.2}", touhou.rank.rate).bold(),
+                    touhou.rank.devi * 1.96
+                ).truecolor(140, 180, 250)
+            }
+            ,
+            touhou.rank.vola * 1000.0
         );
     }
 }
@@ -517,7 +689,7 @@ fn main()
         Err(_) => {
             println!("Data file not good! Creating a new one...");
             let _ = fs::copy("data.bin", "data.bin.bak");
-            println!("The original file has been backed up as 'data.bin.bak'");
+            println!("The original file saved as 'data.bin.bak'");
             generate_data();
             let data_file_again = File::open("data.bin").unwrap();
             let reader_again = BufReader::new(data_file_again);
@@ -525,21 +697,16 @@ fn main()
         }
     };
     let souls_onboard = touhous.len();
-    // match records
     let mut records: Vec<Match> = Vec::new();
 
-    println!("Reading data file complete, got {} touhous.", souls_onboard);
+    println!("Reading data file complete, got {} chracters.", souls_onboard);
 
-    println!("====== Tohorank: Lobby ======");
-    println!("-- 'start': start a new session.");
-    println!("-- 'list':  show the ranking list.");
-    println!("-- 'stat':  see detailed stats about a character.");
-    println!("-- 'info':  info about the rating system.");
-    println!("-- 'exit':  exits");
+    println!("======~ Tohorank: Lobby ~======");
+    lobby_help();
 
+    let mut rl = DefaultEditor::new()?;
     loop {
-        // I don't know how to get history
-        let mut rl = DefaultEditor::new()?;
+        rl.load_history("history.txt").ok();
         let readline = rl.readline("Lobby >> ");
 
         match readline {
@@ -575,9 +742,11 @@ fn main()
                     list(touhous.clone(), how_many);
                 } else if line.starts_with("stat") {
                     match line.split_once(" ") {
-                        Some((_, name)) => {
+                        Some((c, name)) => {
                             match find(&touhous, name.to_string()) {
-                                Some(th) => { stat(th, &touhous); },
+                                Some(th) => {
+                                    stat(th, &touhous, c.len() > 4);
+                                },
                                 None => { println!("Character \"{}\" not found!", name); },
                             }
                         }
@@ -585,19 +754,61 @@ fn main()
                     }
                 } else if line.starts_with("i") {
                     glicko::glicko_info();
+                } else if line.starts_with("h") {
+                    lobby_help();
+                } else if line.starts_with("reset") {
+                    match line.split_once(" ") {
+                        Some((_, name)) => {
+                            match find_mut(&mut touhous, name.to_string()) {
+                                Some(th) => {
+                                    println!("{}: You are about to RESET the ratings and historical stats of {}.",
+                                        "WARNING".red(),
+                                        th.name.red()
+                                    );
+                                    println!("Type 'YES' in uppercase to confirm...");
+                                    let _ = io::stdout().flush();
+                                    let mut choice = String::default();
+                                    let _ = io::stdin().read_line(&mut choice);
+                                    if choice == "YES\n" {
+                                        reset_chara(th);
+                                        write_data(&touhous);
+                                        println!("Done.");
+                                    } else {
+                                        println!("Aborted.");
+                                    }
+                                },
+                                None => { println!("Character \"{}\" not found!", name); },
+                            }
+                        }
+                        None => { println!("Usage: reset [character]"); },
+                    }
                 } else if line.starts_with("e") {
                     break;
                 } else {
                     println!("?");
                 }
+                let _ = rl.add_history_entry(line);
             }
             Err(ReadlineError::Interrupted) => {
                 println!("Caught Ctrl-C, Exit");
+                rl.save_history("history.txt").unwrap();
                 break;
             }
             Err(_) => { eprintln!("?"); }
         }
     } // end lobby loop
 
+    rl.save_history("history.txt").unwrap();
     Ok(()) // ok
+}
+
+fn lobby_help() {
+    println!("-- 'start':   start a new session.");
+    println!("-- 'list':    show the ranking list.");
+    println!("-- 'stat':    see stats of a character.");
+    println!("   'stat!':   even more stats!");
+    println!("-- 'reset':   reset the stat of a character.");
+    println!("-- 'info':    info about the rating system.");
+    println!("-- 'help':    Display this message.");
+    println!("-- 'exit':    exits");
 }
