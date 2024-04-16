@@ -39,8 +39,7 @@ pub fn filter_group_mut<'a>(tags: &'a Vec<Tags>, pool: &'a mut Vec<Chara>) -> Ve
 pub fn rank_slice_by_chara<'a>(chara: &'a Chara, pool: &'a Vec<&'a Chara>) -> Vec<&'a Chara> {
     let mut poolc = pool.clone();
     poolc.retain(|a| !a.dont_know());
-    poolc.sort_by(|a, b| a.rank.rate.partial_cmp(&b.rank.rate).unwrap());
-    poolc.reverse();
+    poolc.sort_by(|a, b| b.rank.rate.partial_cmp(&a.rank.rate).unwrap());
     match poolc.len() {
         ..=3 => poolc,
         4.. => {

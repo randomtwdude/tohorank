@@ -6,7 +6,8 @@
 
 use std::process;
 use std::fs::{self, File};
-use std::time::SystemTime;
+use std::thread;
+use std::time::{self, SystemTime};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{self, BufRead, BufReader, Write, BufWriter};
 use std::str::FromStr;
@@ -277,8 +278,7 @@ fn update_history(touhous: &mut Vec<Chara>, records: &Vec<Match>) {
     for fumo in touhous.iter_mut() {
         fumos.push(fumo);
     }
-    fumos.sort_by(|a, b| a.rank.rate.partial_cmp(&b.rank.rate).unwrap());
-    fumos.reverse();
+    fumos.sort_by(|a, b| b.rank.rate.partial_cmp(&a.rank.rate).unwrap());
 
     let mut rank = 1;
     let mut last_rating = fumos[0].rank.rate;
@@ -495,6 +495,20 @@ fn matchmake(rng: &mut ThreadRng, pool: &Vec<&mut Chara>, threshold: usize)
     pair_id
 }
 
+// parses the start command and generates the final pool of contestants
+fn bouncer(line: &String, touhous: &mut Vec<Chara>)
+-> () /*Vec<&mut Chara>*/ {
+    // build the tags vector
+    let mut groups: Vec<Tags> = Vec::new();
+    for token in line.split(",") {
+
+    }
+    // filter by tags
+
+    // filter by flags (pc98, nongirls, nameless)
+
+}
+
 // Show detailed stats about a character
 fn stat(chara: &Chara, touhous: &Vec<Chara>, full_rankings: bool) {
     // Name and overall rank
@@ -639,20 +653,20 @@ fn stat(chara: &Chara, touhous: &Vec<Chara>, full_rankings: bool) {
 }
 
 // Show the current rankings up to *first* entries
-fn list(mut touhous: Vec<Chara>, first: usize) {
+fn list(mut touhous: Vec<Chara>, first: usize, name_filter: &str) {
     println!("====================== Ranking list ======================");
     println!("#    Name                      Rating           Volatility");
     println!("----------------------------------------------------------");
 
-    touhous.sort_by(|a, b| a.rank.rate.partial_cmp(&b.rank.rate).unwrap());
-    touhous.reverse();
+    touhous.sort_by(|a, b| b.rank.rate.partial_cmp(&a.rank.rate).unwrap());
 
     let mut rank = 1;
+    let mut count = 0;
     let mut last_rating = touhous[0].rank.rate;
-    for (count, touhou) in touhous.iter().filter(|t| !t.dont_know()).enumerate() {
+    for (n, touhou) in touhous.iter().filter(|t| !t.dont_know()).enumerate() {
         if count >= first {
             let mut left = 0;
-            for more_touhou in touhous[count..].iter() {
+            for more_touhou in touhous[n..].iter() {
                 if more_touhou.rank.rate != last_rating {
                     break;
                 }
@@ -664,9 +678,15 @@ fn list(mut touhous: Vec<Chara>, first: usize) {
             break;
         }
         if touhou.rank.rate < last_rating {
-            rank = count + 1;
+            rank = n + 1;
             last_rating = touhou.rank.rate;
         }
+        // filter by name
+        if !touhou.name.to_lowercase().contains(&name_filter.to_lowercase()) {
+            continue;
+        }
+        // print entry
+        count += 1;
         println!("{0: <4} {1: <26}{2}  {3:.2}",
             format!("{}.", rank),
             touhou.name,
@@ -680,8 +700,7 @@ fn list(mut touhous: Vec<Chara>, first: usize) {
                     format!("{:.2}", touhou.rank.rate).bold(),
                     touhou.rank.devi * 1.96
                 ).truecolor(140, 180, 250)
-            }
-            ,
+            },
             touhou.rank.vola * 1000.0
         );
     }
@@ -695,6 +714,7 @@ fn main()
         Ok(file) => file,
         Err(_) => {
             println!("Data file not found! Creating a new one...");
+            thread::sleep(time::Duration::from_secs(2));
             generate_data();
             File::open("data.bin").unwrap() // surely can't be worse
         }
@@ -707,6 +727,7 @@ fn main()
             println!("Data file not good! Creating a new one...");
             let _ = fs::copy("data.bin", "data.bin.bak");
             println!("The original file saved as 'data.bin.bak'");
+            thread::sleep(time::Duration::from_secs(2));
             generate_data();
             let data_file_again = File::open("data.bin").unwrap();
             let reader_again = BufReader::new(data_file_again);
@@ -754,13 +775,24 @@ fn main()
                     }
                 } else if line.starts_with("l") {
                     // list!
-                    let words: Vec<&str> = line.split(" ").collect();
-                    let how_many = if words.len() > 1 {
-                        words[1].trim().parse().unwrap()
-                    } else {
-                        10
-                    };
-                    list(touhous.clone(), how_many);
+                    let mut how_many = 10;
+                    let mut name_filter = "".to_owned();
+                    for token in line.trim().split(" ").skip(1) {
+                        if token.parse::<usize>().is_ok() {
+                            // is a number
+                            how_many = token.parse().unwrap();
+                        } else {
+                            // check if it is a tag
+                            match Tags::from_str(token) {
+                                Ok(t) => {},
+                                Err(_) => {
+                                    // is not a tag, treat as name
+                                    name_filter.push_str(&(token.to_string() + " "));
+                                },
+                            }
+                        }
+                    }
+                    list(touhous.clone(), how_many, name_filter.trim());
                 } else if line.starts_with("stat") {
                     // stat!
                     match line.split_once(" ") {
@@ -812,7 +844,7 @@ fn main()
                                 Some(th) => {
                                     th.toggle_dont_know();
                                     println!("{} will {}be hidden.",
-                                        th.name,
+                                        th.name.bold(),
                                         if th.dont_know() {
                                             ""
                                         } else {
@@ -821,10 +853,7 @@ fn main()
                                     );
                                     write_data(&touhous);
                                 },
-                                None => {
-                                    println!("Character \"{}\" not found!", name);
-                                    continue;
-                                },
+                                None => { println!("Character \"{}\" not found!", name); },
                             }
                         }
                         None => { println!("Usage: know [character]"); },
@@ -835,18 +864,18 @@ fn main()
                     println!("?");
                 }
                 let _ = rl.add_history_entry(line);
+                rl.save_history("history.txt").unwrap();
             }
             Err(ReadlineError::Interrupted) => {
                 println!("Caught Ctrl-C, Exit");
-                rl.save_history("history.txt").unwrap();
                 break;
             }
-            Err(_) => { eprintln!("?"); }
+            Err(_) => { eprintln!("Error?"); }
         }
     } // end lobby loop
 
-    rl.save_history("history.txt").unwrap();
     Ok(()) // ok
+
 }
 
 fn lobby_help() {
@@ -854,9 +883,9 @@ fn lobby_help() {
     println!("-- 'list':    show the ranking list.");
     println!("-- 'stat':    see stats of a character.");
     println!("   'stat!':   even more stats!");
-    println!("-- 'reset':   reset the stat of a character.");
-    println!("-- 'know':    toggle \"don't know\" status for a character.");
+    println!("-- 'reset':   reset the stats of a character.");
+    println!("-- 'know':    hide/unhide a character in rankings.");
     println!("-- 'info':    info about the rating system.");
     println!("-- 'help':    Display this message.");
-    println!("-- 'exit':    exits");
+    println!("-- 'exit':    See you next time.");
 }
