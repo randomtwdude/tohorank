@@ -1,13 +1,16 @@
 // Tohorank: tohosort but infinite and with numbers!
 // it runs a Glicko-2 tournament on the characters.
 
-// terrible Rust code ahead
+// The code is unbelievably janky, but I've managed to
+// satisfy the borrow checker, for now.
+
 use std::process;
 use std::fs::{self, File};
 use std::time::SystemTime;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{self, BufRead, BufReader, Write, BufWriter};
 use std::str::FromStr;
+use rand::rngs::ThreadRng;
 use serde::{Serialize, Deserialize};
 use colored::Colorize;
 use rustyline::error::ReadlineError;
@@ -71,11 +74,8 @@ impl Chara {
     fn dont_know(&self) -> bool {
         self.flags[3]
     }
-    fn set_dont_know(&mut self) {
-        self.flags[3] = true;
-    }
-    fn unset_dont_know(&mut self) {
-        self.flags[3] = false;
+    fn toggle_dont_know(&mut self) {
+        self.flags[3] = !self.flags[3];
     }
     // tag filtering
     fn has_tag(&self, tag: &Tags) -> bool {
@@ -448,20 +448,21 @@ fn glicko_calc(touhous: &mut Vec<Chara>, records: &Vec<Match>) {
 }
 
 // Summons the mutable reference to the two characters at index1,2 (no bound check)
-fn summon(touhous: &mut Vec<Chara>, index1: usize, index2: usize)
--> (&mut Chara, &mut Chara, usize, usize) {
+fn summon<'a>(touhous: &'a mut Vec<&mut Chara>, index1: usize, index2: usize)
+-> (&'a mut Chara, &'a mut Chara, usize, usize) {
     if index1 > index2 {
         let (a, b) = touhous.split_at_mut(index1);
-        (&mut a[index2], &mut b[0], index2, index1)
+        (&mut *a[index2], &mut *b[0], index2, index1)
     } else {
         let (a, b) = touhous.split_at_mut(index2);
-        (&mut a[index1], &mut b[0], index1, index2)
+        (&mut *a[index1], &mut *b[0], index1, index2)
     }
 }
 
 // Find a character by name
 // TODO: some characters with short names (like Mai) are unreachable
-fn find(touhous: &Vec<Chara>, query: String) -> Option<&Chara> {
+fn find(touhous: &Vec<Chara>, query: String)
+-> Option<&Chara> {
     for th in touhous.iter() {
         if th.name.to_lowercase().contains(&query.to_lowercase()) {
             return Some(th);
@@ -469,13 +470,29 @@ fn find(touhous: &Vec<Chara>, query: String) -> Option<&Chara> {
     }
     None
 }
-fn find_mut(touhous: &mut Vec<Chara>, query: String) -> Option<&mut Chara> {
+fn find_mut(touhous: &mut Vec<Chara>, query: String)
+-> Option<&mut Chara> {
     for th in touhous.iter_mut() {
         if th.name.to_lowercase().contains(&query.to_lowercase()) {
             return Some(th);
         }
     }
     None
+}
+
+// Skill-based matchmaking? (best effort)
+fn matchmake(rng: &mut ThreadRng, pool: &Vec<&mut Chara>, threshold: usize)
+-> Vec<usize> {
+    let pool_size = pool.len();
+    let mut pair_id = rand::seq::index::sample(rng, pool_size, 2).into_vec();
+    // 2^63-1 characters ought to be enough for every fandom
+    let mut tries = 0;
+    while tries < 20 ||
+          (pair_id[1] as isize - pair_id[0] as isize).abs() > threshold as isize {
+        pair_id = rand::seq::index::sample(rng, pool_size, 2).into_vec();
+        tries += 1;
+    }
+    pair_id
 }
 
 // Show detailed stats about a character
@@ -496,13 +513,13 @@ fn stat(chara: &Chara, touhous: &Vec<Chara>, full_rankings: bool) {
         if chara.rank.devi > 110.0 {
             format!("    {0:.2} ± {1:.0} | (volatility: {2:.6})",
                 chara.rank.rate,
-                chara.rank.devi,
+                chara.rank.devi * 1.96,
                 chara.rank.vola
             ).truecolor(182, 185, 191)
         } else {
             format!("    {0:.2} ± {1:.0} | (volatility: {2:.6})",
                 chara.rank.rate,
-                chara.rank.devi,
+                chara.rank.devi * 1.96,
                 chara.rank.vola
             ).truecolor(140, 180, 250)
         }
@@ -632,7 +649,7 @@ fn list(mut touhous: Vec<Chara>, first: usize) {
 
     let mut rank = 1;
     let mut last_rating = touhous[0].rank.rate;
-    for (count, touhou) in touhous.iter().enumerate() {
+    for (count, touhou) in touhous.iter().filter(|t| !t.dont_know()).enumerate() {
         if count >= first {
             let mut left = 0;
             for more_touhou in touhous[count..].iter() {
@@ -712,12 +729,15 @@ fn main()
         match readline {
             Ok(line) => {
                 if line.starts_with("star") {
-                    let mut pair_id = rand::seq::index::sample(&mut rng, souls_onboard, 2).into_vec();
+                    // fight!
+                    let no_tags: Vec<Tags> = vec![];
+                    let mut participants = stats::filter_group_mut(&no_tags, &mut touhous);
+                    let mut pair_id = matchmake(&mut rng, &participants, 500);
                     loop {
-                        let (one, two, id_one, id_two) = summon(&mut touhous, pair_id[0], pair_id[1]);
+                        let (one, two, id_one, id_two) = summon(&mut participants, pair_id[0], pair_id[1]);
                         match fight(&mut records, one, two, id_one, id_two) {
                             FightCond::Next => {
-                                pair_id = rand::seq::index::sample(&mut rng, souls_onboard, 2).into_vec();
+                                pair_id = matchmake(&mut rng, &participants, 500);
                             }
                             FightCond::Undo => {
                                 pair_id = vec![records[records.len() - 1].one, records[records.len() - 1].two];
@@ -733,6 +753,7 @@ fn main()
                         }
                     }
                 } else if line.starts_with("l") {
+                    // list!
                     let words: Vec<&str> = line.split(" ").collect();
                     let how_many = if words.len() > 1 {
                         words[1].trim().parse().unwrap()
@@ -741,6 +762,7 @@ fn main()
                     };
                     list(touhous.clone(), how_many);
                 } else if line.starts_with("stat") {
+                    // stat!
                     match line.split_once(" ") {
                         Some((c, name)) => {
                             match find(&touhous, name.to_string()) {
@@ -771,8 +793,8 @@ fn main()
                                     let _ = io::stdin().read_line(&mut choice);
                                     if choice == "YES\n" {
                                         reset_chara(th);
+                                        println!("Resetting {}...", th.name);
                                         write_data(&touhous);
-                                        println!("Done.");
                                     } else {
                                         println!("Aborted.");
                                     }
@@ -781,6 +803,31 @@ fn main()
                             }
                         }
                         None => { println!("Usage: reset [character]"); },
+                    }
+                } else if line.starts_with("know") {
+                    // don't know status hides a character from the rankings
+                    match line.split_once(" ") {
+                        Some((_, name)) => {
+                            match find_mut(&mut touhous, name.to_string()) {
+                                Some(th) => {
+                                    th.toggle_dont_know();
+                                    println!("{} will {}be hidden.",
+                                        th.name,
+                                        if th.dont_know() {
+                                            ""
+                                        } else {
+                                            "no longer "
+                                        }
+                                    );
+                                    write_data(&touhous);
+                                },
+                                None => {
+                                    println!("Character \"{}\" not found!", name);
+                                    continue;
+                                },
+                            }
+                        }
+                        None => { println!("Usage: know [character]"); },
                     }
                 } else if line.starts_with("e") {
                     break;
@@ -808,6 +855,7 @@ fn lobby_help() {
     println!("-- 'stat':    see stats of a character.");
     println!("   'stat!':   even more stats!");
     println!("-- 'reset':   reset the stat of a character.");
+    println!("-- 'know':    toggle \"don't know\" status for a character.");
     println!("-- 'info':    info about the rating system.");
     println!("-- 'help':    Display this message.");
     println!("-- 'exit':    exits");
