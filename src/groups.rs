@@ -3,6 +3,7 @@
 
 use serde::{Serialize, Deserialize};
 use std::str::FromStr;
+use strum_macros::EnumIter;
 
 // Tell the compiler to stop complaining
 #[allow(non_camel_case_types)]
@@ -10,7 +11,7 @@ use std::str::FromStr;
 // Group by the work they appeared in
 // taken from tohosort
 
-#[derive(Hash, Eq, PartialEq, Serialize, Deserialize, Debug, Clone)]
+#[derive(Hash, Eq, PartialEq, Serialize, Deserialize, Debug, Clone, EnumIter)]
 pub enum Tags {
 	book,
 	HRtP,
@@ -137,6 +138,19 @@ impl Tags {
 			Tags::st5	=> "",
 			Tags::st6	=> "",
 			Tags::ex	=> "",
+		}
+	}
+	// Returns true if it's a series tag
+	pub fn is_series_tag(&self) -> bool {
+		match self {
+			Tags::st1	=> false,
+			Tags::st2	=> false,
+			Tags::st3	=> false,
+			Tags::st4	=> false,
+			Tags::st5	=> false,
+			Tags::st6	=> false,
+			Tags::ex	=> false,
+			_	=> true,
 		}
 	}
 }

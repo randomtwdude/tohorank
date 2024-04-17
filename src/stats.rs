@@ -2,8 +2,13 @@
 use crate::{Chara, Tags};
 use colored::Colorize;
 
+// for tags
+const INCLUSIVE: bool = true;
+const EXCLUSIVE: bool = false;
+
 // Get the ranking in a group
-pub fn rank_in_group(touhou: &Chara, pool: &Vec<&Chara>) -> (usize, usize) {
+pub fn rank_in_group(touhou: &Chara, pool: &Vec<&Chara>)
+-> (usize, usize) {
     let mut rank = 1;
     let benchmark = touhou.rank.rate;
     for th in pool.iter().filter(|t| !t.dont_know()) {
@@ -11,32 +16,76 @@ pub fn rank_in_group(touhou: &Chara, pool: &Vec<&Chara>) -> (usize, usize) {
             rank += 1;
         }
     }
-    // ???
     (rank, pool.iter().filter(|t| !t.dont_know()).collect::<Vec<_>>().len())
 }
 
-// Get all characters with some tags, if tags is empty, returns all
-pub fn filter_group<'a>(tags: &'a Vec<Tags>, pool: &'a Vec<Chara>) -> Vec<&'a Chara> {
+// Filter characters in pool by tags
+// Every tag is inclusive (true) or exclusive (false)
+// .0 is the tag, .1 is the inclusive/exclusive bit
+pub fn filter_group<'a>(tags: Vec<(Tags, bool)>, pool: &'a Vec<Chara>)
+-> Vec<&'a Chara> {
     let mut filtered: Vec<&Chara> = Vec::new();
+    // split the two types of tags
+    let (series_t, stages_t): (Vec<_>, Vec<_>) = tags.into_iter().
+        partition(|a| a.0.is_series_tag());
+
+    // first round: series tags
     for th in pool.iter() {
-        if tags.iter().all(|tag| th.has_tag(tag)) {
+        // bit long innit
+        let no_specified_incl_tags = series_t.iter().filter(|a| a.1).collect::<Vec<_>>().is_empty();
+        let has_any_incl_tags = series_t.iter().filter(|a| a.1).any(|tag| th.has_tag(&tag.0));
+        let has_no_excl_tags = series_t.iter().filter(|a| !a.1).all(|tag| !th.has_tag(&tag.0));
+
+        if series_t.is_empty()
+           || (no_specified_incl_tags || has_any_incl_tags) && has_no_excl_tags
+        {
             filtered.push(th);
         }
     }
+    // second round: stages tags
+    let stage_filter = |th: &&Chara| {
+        let no_specified_incl_tags = stages_t.iter().filter(|a| a.1).collect::<Vec<_>>().is_empty();
+        let has_any_incl_tags = stages_t.iter().filter(|a| a.1).any(|tag| th.has_tag(&tag.0));
+        let has_no_excl_tags = stages_t.iter().filter(|a| !a.1).all(|tag| !th.has_tag(&tag.0));
+
+        stages_t.is_empty()
+           || (no_specified_incl_tags || has_any_incl_tags) && has_no_excl_tags
+    };
+    filtered.retain(stage_filter);
+    // final result
     filtered
 }
-pub fn filter_group_mut<'a>(tags: &'a Vec<Tags>, pool: &'a mut Vec<Chara>) -> Vec<&'a mut Chara> {
+// Same as above but returns mutable references
+pub fn filter_group_mut<'a>(tags: Vec<(Tags, bool)>, pool: &'a mut Vec<Chara>) -> Vec<&'a mut Chara> {
     let mut filtered: Vec<&mut Chara> = Vec::new();
+    let (series_t, stages_t): (Vec<_>, Vec<_>) = tags.into_iter().
+        partition(|a| a.0.is_series_tag());
     for th in pool.iter_mut() {
-        if tags.iter().all(|tag| th.has_tag(tag)) {
+        let no_specified_incl_tags = series_t.iter().filter(|a| a.1).collect::<Vec<_>>().is_empty();
+        let has_any_incl_tags = series_t.iter().filter(|a| a.1).any(|tag| th.has_tag(&tag.0));
+        let has_no_excl_tags = series_t.iter().filter(|a| !a.1).all(|tag| !th.has_tag(&tag.0));
+
+        if series_t.is_empty()
+           || (no_specified_incl_tags || has_any_incl_tags) && has_no_excl_tags
+        {
             filtered.push(th);
         }
     }
+    let stage_filter = |th: &&mut Chara| {
+        let no_specified_incl_tags = stages_t.iter().filter(|a| a.1).collect::<Vec<_>>().is_empty();
+        let has_any_incl_tags = stages_t.iter().filter(|a| a.1).any(|tag| th.has_tag(&tag.0));
+        let has_no_excl_tags = stages_t.iter().filter(|a| !a.1).all(|tag| !th.has_tag(&tag.0));
+
+        stages_t.is_empty()
+           || (no_specified_incl_tags || has_any_incl_tags) && has_no_excl_tags
+    };
+    filtered.retain(stage_filter);
     filtered
 }
 
 // Get slice of ranking around character in a group
-pub fn rank_slice_by_chara<'a>(chara: &'a Chara, pool: &'a Vec<&'a Chara>) -> Vec<&'a Chara> {
+pub fn rank_slice_by_chara<'a>(chara: &'a Chara, pool: &'a Vec<&'a Chara>)
+-> Vec<&'a Chara> {
     let mut poolc = pool.clone();
     poolc.retain(|a| !a.dont_know());
     poolc.sort_by(|a, b| b.rank.rate.partial_cmp(&a.rank.rate).unwrap());
@@ -63,13 +112,13 @@ pub fn rank_slice_by_chara<'a>(chara: &'a Chara, pool: &'a Vec<&'a Chara>) -> Ve
 }
 
 // Print rankings in stats, takes one tag
-pub fn print_rank_in_group(chara: &Chara, tag: &Vec<Tags>, pool: &Vec<Chara>) {
+pub fn print_rank_in_group(chara: &Chara, tag: Vec<(Tags, bool)>, pool: &Vec<Chara>) {
     // borrow checker complaining? just clone() !
-    let group = filter_group(tag, pool);
+    let group = filter_group(tag.clone(), pool);
     let rank = rank_in_group(chara, &group);
     println!("\n    - {}: #{}/{}",
         if tag.len() > 0 {
-            format!("in {}", tag.get(0).unwrap().name().bold())
+            format!("in {}", tag.get(0).unwrap().0.name().bold())
         } else {
             "Overall".to_string()
         },

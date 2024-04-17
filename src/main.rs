@@ -12,10 +12,11 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{self, BufRead, BufReader, Write, BufWriter};
 use std::str::FromStr;
 use rand::rngs::ThreadRng;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use colored::Colorize;
 use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, Result};
+use strum::IntoEnumIterator;
 
 use crate::groups::Tags;
 
@@ -91,6 +92,10 @@ struct Match {
     two: usize,
     res: f32,
 }
+
+// for tags
+const INCLUSIVE: bool = true;
+const EXCLUSIVE: bool = false;
 
 // Generate the data file from a stock list of characters
 fn generate_data() {
@@ -334,7 +339,9 @@ fn update_history(touhous: &mut Vec<Chara>, records: &Vec<Match>) {
 // Updates all ratings, write_data() after use.
 fn glicko_calc(touhous: &mut Vec<Chara>, records: &Vec<Match>) {
     println!("Tallying {} matches...", records.len());
-    update_history(touhous, records);
+    if records.len() > 0 {
+        update_history(touhous, records);
+    }
 
     // transform to the glicko-2 scale
     for th in touhous.iter_mut() {
@@ -495,25 +502,98 @@ fn matchmake(rng: &mut ThreadRng, pool: &Vec<&mut Chara>, threshold: usize)
     pair_id
 }
 
-// parses the start command and generates the final pool of contestants
-fn bouncer(line: &String, touhous: &mut Vec<Chara>)
--> () /*Vec<&mut Chara>*/ {
-    // build the tags vector
-    let mut groups: Vec<Tags> = Vec::new();
-    for token in line.split(",") {
+// Parses line for tags (series, stages) and flags (pc98, notgirl, and nameless)
+// Consumes: line
+fn parse_filter(line: String)
+-> (Vec<(Tags, bool)>, [bool; 3]) {
+    let mut tags: Vec<(Tags, bool)> = Vec::new();
+    // Default: no pc98, no non-girls, include nameless
+    let mut flags: [bool; 3] = [false, false, true];
+    let linev: Vec<&str> = line.split(" ").into_iter().collect();
 
+    // remove unrecognised tokens
+    let verify = |a: &&str| {
+        *a == ""
+        ||  a.contains("pc98")
+        ||  a.contains("notgirl")
+        ||  a.contains("namel")
+        ||  if a.starts_with("-") {
+                Tags::from_str(&a.trim()[1..]).is_ok()
+            } else {
+                Tags::from_str(a.trim()).is_ok()
+            }
+    };
+    let (linev, invalid): (Vec<&str>, _) = linev.into_iter()
+        .partition(verify);
+    for word in invalid.iter() {
+        println!("Unrecognised: {}", word);
     }
+
+    // build the tags vector
+    for token in linev.iter() {
+        let is_excl = token.starts_with("-");
+        let token_unsigned = if is_excl {
+            &token[1..]
+        } else {
+            &token[..]
+        };
+        match Tags::from_str(token_unsigned) {
+            Ok(t) => { tags.push((t, !is_excl)); },
+            Err(_) => {
+                match token {
+                    t if t.contains("pc98")     => {
+                        if t.starts_with("-") {
+                            println!("Note: PC-98 duplicates are excluded by default.");
+                        } else {
+                            flags[0] = true;
+                        }
+                    },
+                    t if t.contains("notgirl")  => {
+                        if t.starts_with("-") {
+                            println!("Note: Non-girls are excluded by default.");
+                        } else {
+                            flags[1] = true;
+                        }
+                    },
+                    t if t.contains("namel")   => {
+                        if t.starts_with("-") {
+                            flags[2] = false;
+                        } else {
+                            println!("Note: Nameless characters are included by default.");
+                        }
+                    },
+                    _ => { /* shouldn't happen? */ },
+                }
+            },
+        }
+    }
+    (tags, flags)
+}
+
+// Parses tags and generates the pool of contestants
+// Consumes: line
+fn bouncer(line: String, touhous: &mut Vec<Chara>)
+-> Vec<&mut Chara> {
     // filter by tags
-
+    let (tags, flags): (Vec<(Tags, bool)>, [bool; 3]) = parse_filter(line);
+    let mut filtered: Vec<&mut Chara> = stats::filter_group_mut(tags, touhous);
     // filter by flags (pc98, nongirls, nameless)
-
+    // flags[]: remove if 0
+    let flag_filter = |a: &&mut Chara| {
+        !(!flags[0] && a.is_pc98()
+            || !flags[1] && a.is_not_girl()
+            || !flags[2] && a.is_nameless())
+    };
+    filtered.retain(flag_filter);
+    // final pool
+    filtered
 }
 
 // Show detailed stats about a character
 fn stat(chara: &Chara, touhous: &Vec<Chara>, full_rankings: bool) {
     // Name and overall rank
-    let no_tags: Vec<Tags> = vec![];
-    let everyone = stats::filter_group(&no_tags, touhous);
+    let no_tags: Vec<(Tags, bool)> = vec![];
+    let everyone = stats::filter_group(no_tags.clone(), touhous);
     let ranking_overall = stats::rank_in_group(chara, &everyone);
     println!("{0: <45}{1: >13}",
         format!("~~ {} ~~", chara.name.bold()),
@@ -598,11 +678,11 @@ fn stat(chara: &Chara, touhous: &Vec<Chara>, full_rankings: bool) {
     // Rank informations
     println!("\n==> {}", "RANKINGS".bold());
     // Overall ranks
-    stats::print_rank_in_group(chara, &no_tags, touhous);
+    stats::print_rank_in_group(chara, no_tags, touhous);
     // All the other ranks
     if full_rankings {
         for tag in chara.groups.iter() {
-            stats::print_rank_in_group(chara, &vec![tag.clone()], touhous);
+            stats::print_rank_in_group(chara, vec![(tag.clone(), INCLUSIVE)], touhous);
         }
     } else {
         println!("\n    ⓘ For rankings in various works, use `stat!`");
@@ -653,7 +733,7 @@ fn stat(chara: &Chara, touhous: &Vec<Chara>, full_rankings: bool) {
 }
 
 // Show the current rankings up to *first* entries
-fn list(mut touhous: Vec<Chara>, first: usize, name_filter: &str) {
+fn list(mut touhous: Vec<&Chara>, first: usize, name_filter: &str) {
     println!("====================== Ranking list ======================");
     println!("#    Name                      Rating           Volatility");
     println!("----------------------------------------------------------");
@@ -751,8 +831,18 @@ fn main()
             Ok(line) => {
                 if line.starts_with("star") {
                     // fight!
-                    let no_tags: Vec<Tags> = vec![];
-                    let mut participants = stats::filter_group_mut(&no_tags, &mut touhous);
+                    let filter_str = match line.trim().split_once(" ") {
+                        Some((_, f)) => { f.trim().to_owned() },
+                        None => String::from_str("").unwrap(),
+                    };
+                    let mut participants = bouncer(filter_str, &mut touhous);
+                    if (participants.len() < 2) {
+                        println!("Cannot start with fewer than 2 participants!");
+                        continue;
+                    }
+                    println!("{}",
+                        format!("=== Starting a new session with {} characters... ===", participants.len()).blue()
+                    );
                     let mut pair_id = matchmake(&mut rng, &participants, 500);
                     loop {
                         let (one, two, id_one, id_two) = summon(&mut participants, pair_id[0], pair_id[1]);
@@ -777,14 +867,23 @@ fn main()
                     // list!
                     let mut how_many = 10;
                     let mut name_filter = "".to_owned();
+                    let mut tags_filter = "".to_owned();
                     for token in line.trim().split(" ").skip(1) {
                         if token.parse::<usize>().is_ok() {
                             // is a number
                             how_many = token.parse().unwrap();
                         } else {
                             // check if it is a tag
-                            match Tags::from_str(token) {
-                                Ok(t) => {},
+                            let token_unsigned = if token.starts_with("-") {
+                                &token[1..]
+                            } else {
+                                &token[..]
+                            };
+                            match Tags::from_str(token_unsigned) {
+                                Ok(_) => {
+                                    // is a tag, add it to filter
+                                    tags_filter.push_str(&(token.to_string() + " "));
+                                },
                                 Err(_) => {
                                     // is not a tag, treat as name
                                     name_filter.push_str(&(token.to_string() + " "));
@@ -792,7 +891,11 @@ fn main()
                             }
                         }
                     }
-                    list(touhous.clone(), how_many, name_filter.trim());
+                    let invited = bouncer(tags_filter, &mut touhous);
+                    // I like how this is called "coercion"
+                    let invited_immutable: Vec<&Chara> =
+                        invited.into_iter().map(|a| &*a).collect();
+                    list(invited_immutable, how_many, name_filter.trim());
                 } else if line.starts_with("stat") {
                     // stat!
                     match line.split_once(" ") {
