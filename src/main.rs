@@ -1,29 +1,25 @@
 // Tohorank: tohosort but infinite and with numbers!
-// it runs a Glicko-2 tournament on the characters.
 
 // The code is unbelievably janky, but I've managed to
 // satisfy the borrow checker, for now.
 
-use std::process;
 use std::fs::{self, File};
-use std::time::SystemTime;
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::io::{self, BufRead, BufReader, Write, BufWriter};
+use std::collections::{HashSet, VecDeque};
+use std::io::{self, BufReader, Write};
 use std::str::FromStr;
-use rand::rngs::ThreadRng;
 use serde::{Deserialize, Serialize};
 use colored::Colorize;
 use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, Result};
 use strum::IntoEnumIterator;
-use fuzzy_matcher::FuzzyMatcher;
-use fuzzy_matcher::skim::SkimMatcherV2;
-
 use crate::groups::Tags;
 
 mod glicko;
 mod groups;
 mod stats;
+mod data;
+mod chara;
+mod sort;
 
 // Status returned by fight()
 enum FightCond {
@@ -96,590 +92,227 @@ struct Match {
 
 // for tags
 const INCLUSIVE: bool = true;
-const EXCLUSIVE: bool = false;
 
-// Reads a line from the stock list and give a character
-fn chara_from_string(line: String)
--> Chara {
-    // fields that depend on the list
-    let mut chara_name: String = String::from("");
-    let mut chara_groups: HashSet<Tags> = HashSet::new();
-    let mut chara_flags: [bool; 4] = [false; 4];
-    for (part, data) in line.split("; ").enumerate() {
-        if part == 0 {
-            // name
-            chara_name = data.to_string();
-        } else if part == 1 {
-            // groups
-            for group in data.split(" ") {
-                chara_groups.insert(Tags::from_str(group).unwrap());
-            }
-        } else {
-            // flags
-            match data {
-                "pc98" => {
-                    chara_flags[0] = true;
-                },
-                "nameless" => {
-                    chara_flags[1] = true;
-                },
-                "notgirl" => {
-                    chara_flags[2] = true;
-                },
-                _ => { println!("???: Unknown flag.") },
-            }
+fn lobby_help() {
+    println!("-- 'start':   start a new session.");
+    println!("-- 'list':    show the ranking list.");
+    println!("-- 'stat':    see stats of a character.");
+    println!("   'stat!':   even more stats!");
+    println!("-- 'reset':   reset the stats of a character.");
+    println!("-- 'know':    hide/unhide a character in rankings.");
+    println!("-- 'update':  updates the data file");
+    println!("-- 'help':    display this message.");
+    println!("-- 'tags':    display a list of filters");
+    println!("-- 'exit':    See you next time.");
+}
+
+fn main()
+-> Result<()> {
+    let mut rng = rand::thread_rng();
+    // read data
+    let data_file = match File::open("data.bin") {
+        Ok(file) => file,
+        Err(_) => {
+            println!("Data file not found! Creating a new one...");
+            data::generate_data();
+            File::open("data.bin").unwrap() // surely can't be worse
         }
-    }
-    let touhou = Chara {
-        name: chara_name,
-        rank: Glicko {
-            rate: 1500.0,
-            devi: 350.0,
-            vola: 0.06,
-        },
-        hist: Past {
-            wins: 0,
-            loss: 0,
-            draw: 0,
-            old_rate: VecDeque::with_capacity(7),
-            old_rank: VecDeque::with_capacity(7),
-        },
-        recent: VecDeque::with_capacity(7),
-        groups: chara_groups,
-        flags: chara_flags,
     };
-    touhou
-}
-
-// Generate the data file from a stock list of characters
-fn generate_data() {
-    let start = SystemTime::now();
-    // character array
-    let mut characters: Vec<Chara> = Vec::with_capacity(163);
-
-    // read from touhous.txt
-    let mut err = false;
-    let file = File::open("./src/touhous.txt").unwrap();
-    let reader = io::BufReader::new(file);
-    for (number, line) in reader.lines().skip(3).enumerate() {
-        match line {
-            Ok(l) => {
-                let touhou = chara_from_string(l);
-                println!("#{}: {}", number + 1, touhou.name);
-                characters.push(touhou);
-            }
-            Err(error) => {
-                eprintln!("\nError reading... {}", error);
-                err = true;
-                break;
-            }
+    let reader = BufReader::new(data_file);
+    // all the touhous
+    let mut touhous: Vec<Chara> = match bincode::deserialize_from(reader) {
+        Ok(ths) => ths,
+        Err(_) => {
+            println!("Data file not good! Creating a new one...");
+            let _ = fs::copy("data.bin", "data.bin.bak");
+            println!("The original file saved as 'data.bin.bak'");
+            data::generate_data();
+            let data_file_again = File::open("data.bin").unwrap();
+            let reader_again = BufReader::new(data_file_again);
+            bincode::deserialize_from(reader_again).unwrap() // surely can't be worse
         }
-    }
-    write_data(&characters);
-    if err {
-        println!("Data file generation INCOMPLETE! Something's gone wrong.");
-        process::exit(1);
-    } else {
-        println!("==> Data file generation completed.");
-        println!("    got {} characters in {} µs.",
-            characters.len(),
-            start.elapsed().unwrap().as_micros()
-        );
-    }
-}
+    };
+    let souls_onboard = touhous.len();
+    let mut records: Vec<Match> = Vec::new();
 
-// Update the data file to add (not remove) new characters and flags
-fn update_data(touhous: &mut Vec<Chara>) {
-    // todo: error handling
-    let file = File::open("./src/touhous.txt").unwrap();
-    let reader = io::BufReader::new(file);
-    let (mut updated, mut added) = (0, 0);
-    for (_, line) in reader.lines().skip(3).enumerate() {
-        match line {
-            Ok(l) => {
-                if l.is_empty() {
-                    continue;
-                }
-                let tokens: Vec<&str> = l.split("; ").collect();
-                let name = tokens.get(0).unwrap();
-                if let Some(th) = find_mut_exact(touhous, name.to_string()) {
-                    // update
-                    updated += 1;
-                    (th.flags[0], th.flags[1], th.flags[2]) = (false, false, false);
-                    for (part, data) in tokens.iter().enumerate() {
-                        if part == 1 {
-                            for tag in data.split(" ") {
-                                th.groups.insert(Tags::from_str(tag).unwrap());
+    println!("Reading data file complete, got {} chracters.", souls_onboard);
+    println!("======~ Tohorank: Lobby ~======");
+    lobby_help();
+
+    let mut rl = DefaultEditor::new()?;
+    loop {
+        rl.load_history("history.txt").ok();
+        let readline = rl.readline("Lobby >> ");
+
+        match readline {
+            Ok(line) => {
+                if line.starts_with("star") {
+                    // fight!
+                    let filter_str = match line.trim().split_once(" ") {
+                        Some((_, f)) => { f.trim().to_owned() },
+                        None => String::from_str("").unwrap(),
+                    };
+                    let mut participants = sort::bouncer(filter_str, &mut touhous);
+                    if participants.len() < 2 {
+                        println!("Cannot start with fewer than 2 participants!");
+                        continue;
+                    }
+                    println!("{}",
+                        format!("=== Starting a new session with {} characters... ===", participants.len()).blue()
+                    );
+                    let mut pair_id = sort::matchmake(&mut rng, &participants, 500);
+                    loop {
+                        let (one, two, id_one, id_two) = chara::summon(&mut participants, pair_id[0], pair_id[1]);
+                        match sort::fight(&mut records, one, two, id_one, id_two) {
+                            FightCond::Next => {
+                                pair_id = sort::matchmake(&mut rng, &participants, 500);
                             }
-                        } else if part > 1 {
-                            match *data {
-                                "pc98" => {
-                                    th.flags[0] = true;
-                                },
-                                "nameless" => {
-                                    th.flags[1] = true;
-                                },
-                                "notgirl" => {
-                                    th.flags[2] = true;
-                                },
-                                _ => { println!("???: Unknown flag.") },
+                            FightCond::Undo => {
+                                pair_id = vec![records[records.len() - 1].one, records[records.len() - 1].two];
+                                records.pop();
+                            }
+                            FightCond::Last => {
+                                glicko::calc(&mut touhous, &records);
+                                data::write_data(&touhous);
+                                records.clear();
+                                println!("Data saved! Returning to lobby...");
+                                break;
                             }
                         }
                     }
+                } else if line.starts_with("l") {
+                    // list!
+                    let mut how_many = 10;
+                    let mut name_filter = "".to_owned();
+                    let mut tags_filter = "".to_owned();
+                    for token in line.trim().split(" ").skip(1) {
+                        if token.parse::<usize>().is_ok() {
+                            // is a number
+                            how_many = token.parse().unwrap();
+                        } else {
+                            // check if it is a tag
+                            let token_unsigned = if token.starts_with("-") {
+                                &token[1..]
+                            } else {
+                                &token[..]
+                            };
+                            match Tags::from_str(token_unsigned) {
+                                Ok(_) => {
+                                    // is a tag, add it to filter
+                                    tags_filter.push_str(&(token.to_string() + " "));
+                                },
+                                Err(_) => {
+                                    // is not a tag, treat as name
+                                    name_filter.push_str(&(token.to_string() + " "));
+                                },
+                            }
+                        }
+                    }
+                    let invited = sort::bouncer(tags_filter, &mut touhous);
+                    if invited.len() == 0 {
+                        println!("There's no one here... :(");
+                        continue;
+                    }
+                    // I like how this is called "coercion"
+                    let invited_immutable: Vec<&Chara> =
+                        invited.into_iter().map(|a| &*a).collect();
+                    list(invited_immutable, how_many, name_filter.trim());
+                } else if line.starts_with("stat") {
+                    // stat!
+                    match line.split_once(" ") {
+                        Some((c, name)) => {
+                            match chara::find(&touhous, name.to_string()) {
+                                Some(th) => {
+                                    stat(th, &touhous, c.len() > 4);
+                                },
+                                None => { println!("Character \"{}\" not found!", name); },
+                            }
+                        }
+                        None => { println!("Usage: stat [character]"); },
+                    }
+                } else if line.starts_with("h") {
+                    lobby_help();
+                } else if line.starts_with("reset") {
+                    match line.split_once(" ") {
+                        Some((_, name)) => {
+                            match chara::find_mut(&mut touhous, name.to_string()) {
+                                Some(th) => {
+                                    println!("{}: You are about to RESET the ratings and historical stats of {}.",
+                                        "WARNING".red(),
+                                        th.name.red()
+                                    );
+                                    println!("Type 'YES' in uppercase to confirm...");
+                                    let _ = io::stdout().flush();
+                                    let mut choice = String::default();
+                                    let _ = io::stdin().read_line(&mut choice);
+                                    if choice == "YES\n" {
+                                        chara::reset(th);
+                                        println!("Resetting {}...", th.name);
+                                        data::write_data(&touhous);
+                                    } else {
+                                        println!("Aborted.");
+                                    }
+                                },
+                                None => { println!("Character \"{}\" not found!", name); },
+                            }
+                        }
+                        None => { println!("Usage: reset [character]"); },
+                    }
+                } else if line.starts_with("know") {
+                    // don't know status hides a character from the rankings
+                    match line.split_once(" ") {
+                        Some((_, name)) => {
+                            match chara::find_mut(&mut touhous, name.to_string()) {
+                                Some(th) => {
+                                    th.toggle_dont_know();
+                                    println!("{} will {}be hidden.",
+                                        th.name.bold(),
+                                        if th.dont_know() {
+                                            ""
+                                        } else {
+                                            "no longer "
+                                        }
+                                    );
+                                    data::write_data(&touhous);
+                                },
+                                None => { println!("Character \"{}\" not found!", name); },
+                            }
+                        }
+                        None => { println!("Usage: know [character]"); },
+                    }
+                } else if line.starts_with("update") {
+                    data::update_data(&mut touhous);
+                } else if line.starts_with("tags") {
+                    println!("List of all filter tags:");
+                    println!("You can also specify by number like 'th06'\n");
+                    for tag in Tags::iter() {
+                        if tag.is_series_tag() {
+                            println!("{:<8}{} ~ {}", format!("{:?}", tag), tag.exname(), tag.name());
+                        } else {
+                            println!("{:<8}{}", format!("{:?}", tag), tag.name());
+                        }
+                    }
+                    println!("pc98");
+                    println!("notgirl");
+                    println!("nameless");
+                } else if line.starts_with("e") {
+                    break;
                 } else {
-                    // create
-                    added += 1;
-                    let th = chara_from_string(l);
-                    touhous.push(th);
+                    println!("?");
                 }
+                let _ = rl.add_history_entry(line);
+                rl.save_history("history.txt").unwrap();
             }
-            Err(error) => {
-                eprintln!("\nError reading... {}", error);
+            Err(ReadlineError::Interrupted) => {
+                println!("Caught Ctrl-C, Exit");
                 break;
             }
+            Err(_) => { eprintln!("Error?"); }
         }
-    }
-    write_data(touhous);
-    println!("Update: {} characters updated, {} characters added.", updated, added);
-}
+    } // end lobby loop
 
-// Write to the data file
-fn write_data(touhous: &Vec<Chara>) {
-    // serialize
-    let encoded: Vec<u8> = bincode::serialize(touhous).unwrap();
+    Ok(()) // ok
 
-    // save to data file
-    let data_file = File::create("data.bin").unwrap();
-    let mut writer = BufWriter::new(data_file);
-    writer.write_all(&encoded).unwrap();
-}
-
-// One battle, may add an entry to *records*
-fn fight(records: &mut Vec<Match>, fire: &mut Chara, ice: &mut Chara, fire_id: usize, ice_id: usize)
--> FightCond {
-    let mut choice: String = Default::default();
-    loop {
-        println!("-----------------------------");
-        // println!("Battle #{}: {} vs {}", records.len() + 1, fire.name, ice.name);
-        println!("Battle #{}: {} ({:.0}) vs {} ({:.0})",
-            records.len() + 1,
-            fire.name, fire.rank.rate,
-            ice.name, ice.rank.rate
-        );
-        print!("Pick [ 'h' for help ] >> ");
-        let _ = io::stdout().flush();
-        choice.clear();
-        let _ = io::stdin().read_line(&mut choice);
-
-        let mut game = Match {
-            one: fire_id,
-            two: ice_id,
-            res: 1.0,
-        };
-
-        if choice.starts_with('1') {
-            // I like left
-            println!("Chose - {}!", fire.name.blue());
-        } else if choice.starts_with('2') {
-            // I like right
-            game.res = 0.0;
-            println!("Chose - {}!", ice.name.blue());
-        } else if choice.starts_with('d') {
-            // I dislike them both! (special value)
-            game.res = 2.0;
-            println!("Disliked both!");
-        } else if choice.starts_with('e') {
-            // End
-            println!("Finishing rating period...");
-            return FightCond::Last;
-        } else if choice.starts_with('u') {
-            // Undo
-            if records.len() == 0 {
-                println!("This is the first battle!");
-                continue;
-            }
-            println!("Going back...");
-            return FightCond::Undo;
-        } else if choice.starts_with('h') {
-            // Help
-            println!("1/2 to choose left/right");
-            println!("<Enter> for draws");
-            println!("d if you DISLIKE BOTH of them");
-            println!("u to undo");
-            println!("e to end this session");
-            continue;
-        } else {
-            game.res = 0.5;
-            println!("Chose - Draw!");
-        }
-
-        records.push(game);
-        return FightCond::Next;
-    }
-}
-
-// Reset a character stat
-fn reset_chara(chara: &mut Chara) {
-    *chara = Chara {
-        rank: Glicko {
-            rate: 1500.0,
-            devi: 350.0,
-            vola: 0.06,
-        },
-        hist: Past {
-            wins: 0,
-            loss: 0,
-            draw: 0,
-            old_rank: VecDeque::with_capacity(7),
-            old_rate: VecDeque::with_capacity(7),
-        },
-        recent: VecDeque::with_capacity(7),
-        ..chara.clone()
-    };
-}
-
-// Updates the history records for each character
-fn update_history(touhous: &mut Vec<Chara>, records: &Vec<Match>) {
-    // fumos are references to touhous, right
-    let mut fumos: Vec<&mut Chara> = Vec::with_capacity(touhous.len());
-    for fumo in touhous.iter_mut() {
-        fumos.push(fumo);
-    }
-    fumos.sort_by(|a, b| b.rank.rate.partial_cmp(&a.rank.rate).unwrap());
-
-    let mut rank = 1;
-    let mut last_rating = fumos[0].rank.rate;
-    for fumo in fumos {
-        // calculate rank
-        if fumo.rank.rate < last_rating {
-            rank += 1;
-            last_rating = fumo.rank.rate;
-        }
-        // max 7 historical entries
-        if fumo.hist.old_rank.len() >= 7 {
-            fumo.hist.old_rank.pop_back();
-            fumo.hist.old_rate.pop_back();
-        }
-        fumo.hist.old_rank.push_front(rank);
-        fumo.hist.old_rate.push_front(fumo.rank.rate);
-    }
-
-    // update win/loss/draw and recent battles
-    for battle in records.iter() {
-        // wdl
-        match battle.res {
-            r if r == 2.0 => {
-                touhous[battle.one].hist.loss += 1;
-                touhous[battle.two].hist.loss += 1;
-            },
-            r if r == 1.0 => {
-                touhous[battle.one].hist.wins += 1;
-                touhous[battle.two].hist.loss += 1;
-            },
-            r if r == 0.5 => {
-                touhous[battle.one].hist.draw += 1;
-                touhous[battle.two].hist.draw += 1;
-            },
-            r if r == 0.0 => {
-                touhous[battle.one].hist.loss += 1;
-                touhous[battle.two].hist.wins += 1;
-            },
-            _ => { println!("update_history: ???"); },
-        }
-        // recent battles
-        if touhous[battle.one].recent.len() >= 7 {
-            touhous[battle.one].recent.pop_back();
-        }
-        if touhous[battle.two].recent.len() >= 7 {
-            touhous[battle.two].recent.pop_back();
-        }
-        touhous[battle.one].recent.push_front(battle.clone());
-        touhous[battle.two].recent.push_front(battle.clone());
-    }
-}
-
-// Updates all ratings, write_data() after use.
-fn glicko_calc(touhous: &mut Vec<Chara>, records: &Vec<Match>) {
-    println!("Tallying {} matches...", records.len());
-    if records.len() > 0 {
-        update_history(touhous, records);
-    }
-
-    // transform to the glicko-2 scale
-    for th in touhous.iter_mut() {
-        glicko::glicko_two_scale(&mut th.rank.rate, &mut th.rank.devi);
-    }
-
-    // First we need to calculate the quantities v and delta
-    let mut qt_v: HashMap<usize, f64> = HashMap::new();
-    let mut qt_d: HashMap<usize, f64> = HashMap::new();
-
-    // initialize hashmaps
-    for battle in records.iter() {
-        qt_v.insert(battle.one, 0.0);
-        qt_v.insert(battle.two, 0.0);
-        qt_d.insert(battle.one, 0.0);
-        qt_d.insert(battle.two, 0.0);
-    }
-
-    for battle in records.iter() {
-        // fetch numbers
-        let r1 = touhous[battle.one].rank.rate;
-        let r2 = touhous[battle.two].rank.rate;
-        let rd1 = touhous[battle.one].rank.devi;
-        let rd2 = touhous[battle.two].rank.devi;
-        let (s1, s2) = if battle.res == 2.0 {
-            // both sides lose, but not as much as when only one side loses
-            (0.25, 0.25)
-        } else {
-            (battle.res, 1.0 - battle.res)
-        };
-        // update v1
-        let v1_add: f64 = glicko::part_v(&r1, &r2, &rd2);
-        if let Some(v1) = qt_v.get_mut(&battle.one) {
-            *v1 += v1_add;
-        }
-        // update v2
-        let v2_add: f64 = glicko::part_v(&r2, &r1, &rd1);
-        if let Some(v2) = qt_v.get_mut(&battle.two) {
-            *v2 += v2_add;
-        }
-        // update d1
-        let d1_add: f64 = glicko::part_d(&r1, &r2, &rd2, &s1);
-        if let Some(d1) = qt_d.get_mut(&battle.one) {
-            *d1 += d1_add;
-        }
-        // update d2
-        let d2_add: f64 = glicko::part_d(&r2, &r1, &rd1, &s2);
-        if let Some(d2) = qt_d.get_mut(&battle.two) {
-            *d2 += d2_add;
-        }
-    }
-    // finally, take the inverse of v
-    for (_, val) in qt_v.iter_mut() {
-        *val = val.powi(-1);
-    }
-    // and multiple d by v
-    for (key, val) in qt_d.iter_mut() {
-        *val *= qt_v[key];
-    }
-
-    // now we have the v and deltas, we move to calculating
-    // the new rating volatilities
-
-    // lower for better accuracy? (doesn't look like it)
-    const CONV_TOLERANCE: f64 = 0.000001;
-    // the system constant, the paper says it should be 0.3~1.2
-    const TAU: f64 = 0.75;
-
-    // update the volatility for all characters in this session
-    for th in qt_v.keys() {
-        touhous[*th].rank.vola = glicko::calc_new_volatility(
-            &qt_v[th],
-            &qt_d[th],
-            &touhous[*th].rank.vola,
-            &touhous[*th].rank.devi,
-            &TAU,
-            &CONV_TOLERANCE
-        );
-    }
-
-    // now we update the rating deviations,
-    // first round on all characters
-    for th in touhous.iter_mut() {
-        th.rank.devi = glicko::adjust_deviation(
-            &th.rank.devi,
-            &th.rank.vola
-        );
-    }
-    // second round on battled characters
-    for th in qt_v.keys() {
-        touhous[*th].rank.devi = glicko::calc_new_deviation(
-            &touhous[*th].rank.devi,
-            &qt_v[th]
-        );
-    }
-
-    // finally, we calculate the new ratings
-    for th in qt_v.keys() {
-        touhous[*th].rank.rate = glicko::calc_new_rating(
-            &touhous[*th].rank.rate,
-            &touhous[*th].rank.devi,
-            &qt_v[th],
-            &qt_d[th]
-        );
-    }
-
-    // transform back to glicko scale
-    for th in touhous.iter_mut() {
-        glicko::glicko_one_scale(&mut th.rank.rate, &mut th.rank.devi);
-    }
-}
-
-// Summons the mutable reference to the two characters at index1,2 (no bound check)
-fn summon<'a>(touhous: &'a mut Vec<&mut Chara>, index1: usize, index2: usize)
--> (&'a mut Chara, &'a mut Chara, usize, usize) {
-    if index1 > index2 {
-        let (a, b) = touhous.split_at_mut(index1);
-        (&mut *a[index2], &mut *b[0], index2, index1)
-    } else {
-        let (a, b) = touhous.split_at_mut(index2);
-        (&mut *a[index1], &mut *b[0], index1, index2)
-    }
-}
-
-// Find a character by name
-fn find(touhous: &Vec<Chara>, query: String)
--> Option<&Chara> {
-    let matcher = SkimMatcherV2::default();
-    let mut best_match: Option<&Chara> = None;
-    let mut best_score = 0;
-    for th in touhous.iter() {
-        if let Some(score) = matcher.fuzzy_match(&th.name, &query) {
-            if score > best_score {
-                best_match = Some(th);
-                best_score = score;
-            }
-        }
-    }
-    best_match
-}
-fn find_mut(touhous: &mut Vec<Chara>, query: String)
--> Option<&mut Chara> {
-    let matcher = SkimMatcherV2::default();
-    let mut best_match: Option<&mut Chara> = None;
-    let mut best_score = 0;
-    for th in touhous.iter_mut() {
-        if let Some(score) = matcher.fuzzy_match(&th.name, &query) {
-            if score > best_score {
-                best_match = Some(th);
-                best_score = score;
-            }
-        }
-    }
-    best_match
-}
-// Exact match
-fn find_mut_exact(touhous: &mut Vec<Chara>, query: String)
--> Option<&mut Chara> {
-    for th in touhous.iter_mut() {
-        if th.name == query {
-            return Some(th);
-        }
-    }
-    None
-}
-
-// Skill-based matchmaking? (best effort)
-fn matchmake(rng: &mut ThreadRng, pool: &Vec<&mut Chara>, threshold: usize)
--> Vec<usize> {
-    let pool_size = pool.len();
-    let mut pair_id = rand::seq::index::sample(rng, pool_size, 2).into_vec();
-    // 2^63-1 characters ought to be enough for every fandom
-    let mut tries = 0;
-    while tries < 20 ||
-          (pair_id[1] as isize - pair_id[0] as isize).abs() > threshold as isize {
-        pair_id = rand::seq::index::sample(rng, pool_size, 2).into_vec();
-        tries += 1;
-    }
-    pair_id
-}
-
-// Parses line for tags (series, stages) and flags (pc98, notgirl, and nameless)
-// Consumes: line
-fn parse_filter(line: String)
--> (Vec<(Tags, bool)>, [bool; 3]) {
-    let mut tags: Vec<(Tags, bool)> = Vec::new();
-    // Default: no pc98, no non-girls, include nameless
-    let mut flags: [bool; 3] = [false, false, true];
-    let linev: Vec<&str> = line.split(" ").into_iter().collect();
-
-    // remove unrecognised tokens
-    let verify = |a: &&str| {
-        *a == ""
-        ||  a.contains("pc98")
-        ||  a.contains("notgirl")
-        ||  a.contains("namel")
-        ||  if a.starts_with("-") {
-                Tags::from_str(&a.trim()[1..]).is_ok()
-            } else {
-                Tags::from_str(a.trim()).is_ok()
-            }
-    };
-    let (linev, invalid): (Vec<&str>, _) = linev.into_iter()
-        .partition(verify);
-    for word in invalid.iter() {
-        println!("Unrecognised: {}", word);
-    }
-
-    // build the tags vector
-    for token in linev.iter() {
-        let is_excl = token.starts_with("-");
-        let token_unsigned = if is_excl {
-            &token[1..]
-        } else {
-            &token[..]
-        };
-        match Tags::from_str(token_unsigned) {
-            Ok(t) => {
-                println!("Filter: {} {}",
-                    if is_excl {
-                        "Excluding".red()
-                    } else {
-                        "Including".blue()
-                    },
-                    t.name().bold()
-                );
-                tags.push((t, !is_excl));
-            },
-            Err(_) => {
-                match token {
-                    t if t.contains("pc98")     => {
-                        if t.starts_with("-") {
-                            println!("Note: PC-98 duplicates are excluded by default.");
-                        } else {
-                            flags[0] = true;
-                        }
-                    },
-                    t if t.contains("notgirl")  => {
-                        if t.starts_with("-") {
-                            println!("Note: Non-girls are excluded by default.");
-                        } else {
-                            flags[1] = true;
-                        }
-                    },
-                    t if t.contains("namel")   => {
-                        if t.starts_with("-") {
-                            flags[2] = false;
-                        } else {
-                            println!("Note: Nameless characters are included by default.");
-                        }
-                    },
-                    _ => { /* shouldn't happen? */ },
-                }
-            },
-        }
-    }
-    (tags, flags)
-}
-
-// Parses tags and generates the pool of contestants
-// Consumes: line
-fn bouncer(line: String, touhous: &mut Vec<Chara>)
--> Vec<&mut Chara> {
-    // filter by tags
-    let (tags, flags): (Vec<(Tags, bool)>, [bool; 3]) = parse_filter(line);
-    let mut filtered: Vec<&mut Chara> = stats::filter_group_mut(tags, touhous);
-    // filter by flags (pc98, nongirls, nameless)
-    // flags[]: remove if 0
-    let flag_filter = |a: &&mut Chara| {
-        !(!flags[0] && a.is_pc98()
-            || !flags[1] && a.is_not_girl()
-            || !flags[2] && a.is_nameless())
-    };
-    filtered.retain(flag_filter);
-    // final pool
-    filtered
 }
 
 // Show detailed stats about a character
@@ -807,7 +440,7 @@ fn stat(chara: &Chara, touhous: &Vec<Chara>, full_rankings: bool) {
         } else {
             side = 2;
         }
-        println!("    {} against {}",
+        println!("    {} against {} ({:.0})",
             match battle.res {
                 r if r == 0.5 => { "Drew".white().bold() },
                 r if r == 2.0 => { "Drew (lost)".red().bold() },
@@ -821,6 +454,11 @@ fn stat(chara: &Chara, touhous: &Vec<Chara>, full_rankings: bool) {
                 touhous.get(battle.two).unwrap().name.clone()
             } else {
                 touhous.get(battle.one).unwrap().name.clone()
+            },
+            if side == 1 {
+                touhous.get(battle.two).unwrap().rank.rate
+            } else {
+                touhous.get(battle.one).unwrap().rank.rate
             }
         );
     }
@@ -864,13 +502,12 @@ fn list(mut touhous: Vec<&Chara>, first: usize, name_filter: &str) {
         let rk_diff: isize = rank as isize - *touhou.hist.old_rank.back().unwrap() as isize;
         let trend = format!("{}",
             if rk_diff.abs() > 5 {
-                format!("{} {}",
+                format!("{}",
                     if rk_diff.is_positive() {
-                        "🡾".red()
+                        "🡾 ".red()
                     } else {
-                        "🡽".blue()
-                    },
-                    rk_diff.abs()
+                        "🡽 ".blue()
+                    }
                 )
             } else {
                 "".to_string()
@@ -880,17 +517,18 @@ fn list(mut touhous: Vec<&Chara>, first: usize, name_filter: &str) {
         let mut favorite = "";
         let mut touhous2: Vec<Chara> = Vec::new();
         for th in touhous.iter() {
-            touhous2.push(th.clone().clone()); // ??
+            #[allow(suspicious_double_ref_op)]
+            touhous2.push(th.clone().clone()); // works
         }
         for tag in touhou.groups.iter() {
             let group = stats::filter_group(vec![(tag.clone(), INCLUSIVE)], &touhous2);
             if stats::rank_in_group(touhou, &group).0 == 1 {
-                favorite = "👑";
+                favorite = "👑 ";
                 break;
             }
         }
         // final entry
-        let entry = format!("{:<4} {:<26}{}  {} {}",
+        let entry = format!("{:<4} {:<26}{}  {}{}",
             format!("{}.", rank),
             touhou.name,
             if touhou.rank.devi > 110.0 {
@@ -902,7 +540,7 @@ fn list(mut touhous: Vec<&Chara>, first: usize, name_filter: &str) {
                 format!("({0: <7} ± {1:.0})",
                     format!("{:.2}", touhou.rank.rate).bold(),
                     touhou.rank.devi * 1.96
-                ).truecolor(140, 180, 250)
+                ).normal()
             },
             trend,
             favorite.blue()
@@ -915,216 +553,4 @@ fn list(mut touhous: Vec<&Chara>, first: usize, name_filter: &str) {
         }
     }
     println!();
-}
-
-fn main()
--> Result<()> {
-    let mut rng = rand::thread_rng();
-    // read data
-    let data_file = match File::open("data.bin") {
-        Ok(file) => file,
-        Err(_) => {
-            println!("Data file not found! Creating a new one...");
-            generate_data();
-            File::open("data.bin").unwrap() // surely can't be worse
-        }
-    };
-    let reader = BufReader::new(data_file);
-    // all the touhous
-    let mut touhous: Vec<Chara> = match bincode::deserialize_from(reader) {
-        Ok(ths) => ths,
-        Err(_) => {
-            println!("Data file not good! Creating a new one...");
-            let _ = fs::copy("data.bin", "data.bin.bak");
-            println!("The original file saved as 'data.bin.bak'");
-            generate_data();
-            let data_file_again = File::open("data.bin").unwrap();
-            let reader_again = BufReader::new(data_file_again);
-            bincode::deserialize_from(reader_again).unwrap() // surely can't be worse
-        }
-    };
-    let souls_onboard = touhous.len();
-    let mut records: Vec<Match> = Vec::new();
-
-    println!("Reading data file complete, got {} chracters.", souls_onboard);
-
-    println!("======~ Tohorank: Lobby ~======");
-    lobby_help();
-
-    let mut rl = DefaultEditor::new()?;
-    loop {
-        rl.load_history("history.txt").ok();
-        let readline = rl.readline("Lobby >> ");
-
-        match readline {
-            Ok(line) => {
-                if line.starts_with("star") {
-                    // fight!
-                    let filter_str = match line.trim().split_once(" ") {
-                        Some((_, f)) => { f.trim().to_owned() },
-                        None => String::from_str("").unwrap(),
-                    };
-                    let mut participants = bouncer(filter_str, &mut touhous);
-                    if participants.len() < 2 {
-                        println!("Cannot start with fewer than 2 participants!");
-                        continue;
-                    }
-                    println!("{}",
-                        format!("=== Starting a new session with {} characters... ===", participants.len()).blue()
-                    );
-                    let mut pair_id = matchmake(&mut rng, &participants, 500);
-                    loop {
-                        let (one, two, id_one, id_two) = summon(&mut participants, pair_id[0], pair_id[1]);
-                        match fight(&mut records, one, two, id_one, id_two) {
-                            FightCond::Next => {
-                                pair_id = matchmake(&mut rng, &participants, 500);
-                            }
-                            FightCond::Undo => {
-                                pair_id = vec![records[records.len() - 1].one, records[records.len() - 1].two];
-                                records.pop();
-                            }
-                            FightCond::Last => {
-                                glicko_calc(&mut touhous, &records);
-                                write_data(&touhous);
-                                records.clear();
-                                println!("Data saved! Returning to lobby...");
-                                break;
-                            }
-                        }
-                    }
-                } else if line.starts_with("l") {
-                    // list!
-                    let mut how_many = 10;
-                    let mut name_filter = "".to_owned();
-                    let mut tags_filter = "".to_owned();
-                    for token in line.trim().split(" ").skip(1) {
-                        if token.parse::<usize>().is_ok() {
-                            // is a number
-                            how_many = token.parse().unwrap();
-                        } else {
-                            // check if it is a tag
-                            let token_unsigned = if token.starts_with("-") {
-                                &token[1..]
-                            } else {
-                                &token[..]
-                            };
-                            match Tags::from_str(token_unsigned) {
-                                Ok(_) => {
-                                    // is a tag, add it to filter
-                                    tags_filter.push_str(&(token.to_string() + " "));
-                                },
-                                Err(_) => {
-                                    // is not a tag, treat as name
-                                    name_filter.push_str(&(token.to_string() + " "));
-                                },
-                            }
-                        }
-                    }
-                    let invited = bouncer(tags_filter, &mut touhous);
-                    if invited.len() == 0 {
-                        println!("There's no one here... :(");
-                        continue;
-                    }
-                    // I like how this is called "coercion"
-                    let invited_immutable: Vec<&Chara> =
-                        invited.into_iter().map(|a| &*a).collect();
-                    list(invited_immutable, how_many, name_filter.trim());
-                } else if line.starts_with("stat") {
-                    // stat!
-                    match line.split_once(" ") {
-                        Some((c, name)) => {
-                            match find(&touhous, name.to_string()) {
-                                Some(th) => {
-                                    stat(th, &touhous, c.len() > 4);
-                                },
-                                None => { println!("Character \"{}\" not found!", name); },
-                            }
-                        }
-                        None => { println!("Usage: stat [character]"); },
-                    }
-                } else if line.starts_with("i") {
-                    glicko::glicko_info();
-                } else if line.starts_with("h") {
-                    lobby_help();
-                } else if line.starts_with("reset") {
-                    match line.split_once(" ") {
-                        Some((_, name)) => {
-                            match find_mut(&mut touhous, name.to_string()) {
-                                Some(th) => {
-                                    println!("{}: You are about to RESET the ratings and historical stats of {}.",
-                                        "WARNING".red(),
-                                        th.name.red()
-                                    );
-                                    println!("Type 'YES' in uppercase to confirm...");
-                                    let _ = io::stdout().flush();
-                                    let mut choice = String::default();
-                                    let _ = io::stdin().read_line(&mut choice);
-                                    if choice == "YES\n" {
-                                        reset_chara(th);
-                                        println!("Resetting {}...", th.name);
-                                        write_data(&touhous);
-                                    } else {
-                                        println!("Aborted.");
-                                    }
-                                },
-                                None => { println!("Character \"{}\" not found!", name); },
-                            }
-                        }
-                        None => { println!("Usage: reset [character]"); },
-                    }
-                } else if line.starts_with("know") {
-                    // don't know status hides a character from the rankings
-                    match line.split_once(" ") {
-                        Some((_, name)) => {
-                            match find_mut(&mut touhous, name.to_string()) {
-                                Some(th) => {
-                                    th.toggle_dont_know();
-                                    println!("{} will {}be hidden.",
-                                        th.name.bold(),
-                                        if th.dont_know() {
-                                            ""
-                                        } else {
-                                            "no longer "
-                                        }
-                                    );
-                                    write_data(&touhous);
-                                },
-                                None => { println!("Character \"{}\" not found!", name); },
-                            }
-                        }
-                        None => { println!("Usage: know [character]"); },
-                    }
-                } else if line.starts_with("update") {
-                    update_data(&mut touhous);
-                } else if line.starts_with("e") {
-                    break;
-                } else {
-                    println!("?");
-                }
-                let _ = rl.add_history_entry(line);
-                rl.save_history("history.txt").unwrap();
-            }
-            Err(ReadlineError::Interrupted) => {
-                println!("Caught Ctrl-C, Exit");
-                break;
-            }
-            Err(_) => { eprintln!("Error?"); }
-        }
-    } // end lobby loop
-
-    Ok(()) // ok
-
-}
-
-fn lobby_help() {
-    println!("-- 'start':   start a new session.");
-    println!("-- 'list':    show the ranking list.");
-    println!("-- 'stat':    see stats of a character.");
-    println!("   'stat!':   even more stats!");
-    println!("-- 'reset':   reset the stats of a character.");
-    println!("-- 'know':    hide/unhide a character in rankings.");
-    println!("-- 'update':  updates the data file after changes to list");
-    println!("-- 'info':    info about the rating system.");
-    println!("-- 'help':    Display this message.");
-    println!("-- 'exit':    See you next time.");
 }

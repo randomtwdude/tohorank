@@ -2,10 +2,6 @@
 use crate::{Chara, Tags};
 use colored::Colorize;
 
-// for tags
-const INCLUSIVE: bool = true;
-const EXCLUSIVE: bool = false;
-
 // Get the ranking in a group
 pub fn rank_in_group(touhou: &Chara, pool: &Vec<&Chara>)
 -> (usize, usize) {
@@ -139,7 +135,11 @@ pub fn print_rank_in_group(chara: &Chara, tag: Vec<(Tags, bool)>, pool: &Vec<Cha
         let rank = rank_in_group(th, &group).0;
         let entry = format!("    {0: <4} {1: <26} {2} ± {3:.0}",
             format!("{}.", rank),
-            th.name,
+            if th.name == chara.name {
+                th.name.bold()
+            } else {
+                th.name.normal()
+            },
             format!("{:.0}", th.rank.rate).bold(),
             th.rank.devi * 1.96
         );

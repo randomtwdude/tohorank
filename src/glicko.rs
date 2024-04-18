@@ -1,6 +1,127 @@
-// All the math for the Glicko calculations
+// Glicko-2 rating system
 
 use std::f64::consts::PI;
+
+use crate::{chara, glicko, Chara, Match};
+use std::collections::HashMap;
+
+// Updates all ratings, data::write_data() after use.
+pub fn calc(touhous: &mut Vec<Chara>, records: &Vec<Match>) {
+    println!("Tallying {} matches...", records.len());
+    if records.len() > 0 {
+        chara::update_history(touhous, records);
+    }
+
+    // transform to the glicko-2 scale
+    for th in touhous.iter_mut() {
+        glicko::glicko_two_scale(&mut th.rank.rate, &mut th.rank.devi);
+    }
+
+    // First we need to calculate the quantities v and delta
+    let mut qt_v: HashMap<usize, f64> = HashMap::new();
+    let mut qt_d: HashMap<usize, f64> = HashMap::new();
+
+    // initialize hashmaps
+    for battle in records.iter() {
+        qt_v.insert(battle.one, 0.0);
+        qt_v.insert(battle.two, 0.0);
+        qt_d.insert(battle.one, 0.0);
+        qt_d.insert(battle.two, 0.0);
+    }
+
+    for battle in records.iter() {
+        // fetch numbers
+        let r1 = touhous[battle.one].rank.rate;
+        let r2 = touhous[battle.two].rank.rate;
+        let rd1 = touhous[battle.one].rank.devi;
+        let rd2 = touhous[battle.two].rank.devi;
+        let (s1, s2) = if battle.res == 2.0 {
+            // both sides lose, but not as much as when only one side loses
+            (0.25, 0.25)
+        } else {
+            (battle.res, 1.0 - battle.res)
+        };
+        // update v1
+        let v1_add: f64 = glicko::part_v(&r1, &r2, &rd2);
+        if let Some(v1) = qt_v.get_mut(&battle.one) {
+            *v1 += v1_add;
+        }
+        // update v2
+        let v2_add: f64 = glicko::part_v(&r2, &r1, &rd1);
+        if let Some(v2) = qt_v.get_mut(&battle.two) {
+            *v2 += v2_add;
+        }
+        // update d1
+        let d1_add: f64 = glicko::part_d(&r1, &r2, &rd2, &s1);
+        if let Some(d1) = qt_d.get_mut(&battle.one) {
+            *d1 += d1_add;
+        }
+        // update d2
+        let d2_add: f64 = glicko::part_d(&r2, &r1, &rd1, &s2);
+        if let Some(d2) = qt_d.get_mut(&battle.two) {
+            *d2 += d2_add;
+        }
+    }
+    // finally, take the inverse of v
+    for (_, val) in qt_v.iter_mut() {
+        *val = val.powi(-1);
+    }
+    // and multiple d by v
+    for (key, val) in qt_d.iter_mut() {
+        *val *= qt_v[key];
+    }
+
+    // now we have the v and deltas, we move to calculating
+    // the new rating volatilities
+
+    // lower for better accuracy? (doesn't look like it)
+    const CONV_TOLERANCE: f64 = 0.000001;
+    // the system constant, the paper says it should be 0.3~1.2
+    const TAU: f64 = 0.75;
+
+    // update the volatility for all characters in this session
+    for th in qt_v.keys() {
+        touhous[*th].rank.vola = glicko::calc_new_volatility(
+            &qt_v[th],
+            &qt_d[th],
+            &touhous[*th].rank.vola,
+            &touhous[*th].rank.devi,
+            &TAU,
+            &CONV_TOLERANCE
+        );
+    }
+
+    // now we update the rating deviations,
+    // first round on all characters
+    for th in touhous.iter_mut() {
+        th.rank.devi = glicko::adjust_deviation(
+            &th.rank.devi,
+            &th.rank.vola
+        );
+    }
+    // second round on battled characters
+    for th in qt_v.keys() {
+        touhous[*th].rank.devi = glicko::calc_new_deviation(
+            &touhous[*th].rank.devi,
+            &qt_v[th]
+        );
+    }
+
+    // finally, we calculate the new ratings
+    for th in qt_v.keys() {
+        touhous[*th].rank.rate = glicko::calc_new_rating(
+            &touhous[*th].rank.rate,
+            &touhous[*th].rank.devi,
+            &qt_v[th],
+            &qt_d[th]
+        );
+    }
+
+    // transform back to glicko scale
+    for th in touhous.iter_mut() {
+        glicko::glicko_one_scale(&mut th.rank.rate, &mut th.rank.devi);
+    }
+}
 
 // convert from glicko to glicko-2
 pub fn glicko_two_scale(rate: &mut f64, devi: &mut f64) {
@@ -118,10 +239,4 @@ pub fn calc_new_deviation(phi: &f64, v: &f64) -> f64 {
 // calculate new rating
 pub fn calc_new_rating(mu: &f64, phi: &f64, v: &f64, d: &f64) -> f64 {
     mu + (d * phi.powi(2) / v)
-}
-
-// prints helpful info
-pub fn glicko_info() {
-    println!("About the Glicko rating system:");
-    // TODO: add intrduction
 }
