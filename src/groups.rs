@@ -160,6 +160,7 @@ impl FromStr for Tags {
 	type Err = ();
 	fn from_str(input: &str) -> Result<Tags, Self::Err> {
 		match input.to_lowercase().as_str() {
+			"book"	=> Ok(Tags::book),
 			"hrtp"	| "th01"	=> Ok(Tags::HRtP),
 			"soew"	| "th02"	=> Ok(Tags::SoEW),
 			"podd"	| "th03"	=> Ok(Tags::PoDD),

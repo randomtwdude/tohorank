@@ -116,23 +116,38 @@ pub fn print_rank_in_group(chara: &Chara, tag: Vec<(Tags, bool)>, pool: &Vec<Cha
     // borrow checker complaining? just clone() !
     let group = filter_group(tag.clone(), pool);
     let rank = rank_in_group(chara, &group);
-    println!("\n    - {}: #{}/{}",
+    // title
+    println!("\n  - {:<34}{:>8}",
         if tag.len() > 0 {
-            format!("in {}", tag.get(0).unwrap().0.name().bold())
+            if tag[0].0.exname() != "" {
+                format!("in TH{}", tag[0].0.exname())
+            } else {
+                format!("in {}", tag[0].0.name())
+            }
         } else {
             "Overall".to_string()
         },
-        rank.0,
-        rank.1
+        format!("#{}/{}", rank.0, rank.1)
     );
+    // more title
+    if tag.len() > 0 && tag[0].0.exname() != "" {
+        println!("    {:^42}", tag[0].0.name().bold());
+    }
     println!("    {:-<42}", "");
     let rank_list = rank_slice_by_chara(chara, &group);
     for th in rank_list.iter() {
-        println!("    {0: <4} {1: <26} {2} ± {3:.0}",
-            format!("{}.", rank_in_group(th, &group).0),
+        let rank = rank_in_group(th, &group).0;
+        let entry = format!("    {0: <4} {1: <26} {2} ± {3:.0}",
+            format!("{}.", rank),
             th.name,
             format!("{:.0}", th.rank.rate).bold(),
             th.rank.devi * 1.96
         );
+        match rank {
+            1 => { println!("{}", entry.truecolor(245, 212, 95)); },
+            2 => { println!("{}", entry.truecolor(180, 245, 212)); },
+            3 => { println!("{}", entry.truecolor(240, 140, 95)); },
+            _ => { println!("{}", entry); },
+        }
     }
 }

@@ -6,8 +6,7 @@
 
 use std::process;
 use std::fs::{self, File};
-use std::thread;
-use std::time::{self, SystemTime};
+use std::time::SystemTime;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{self, BufRead, BufReader, Write, BufWriter};
 use std::str::FromStr;
@@ -17,6 +16,8 @@ use colored::Colorize;
 use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, Result};
 use strum::IntoEnumIterator;
+use fuzzy_matcher::FuzzyMatcher;
+use fuzzy_matcher::skim::SkimMatcherV2;
 
 use crate::groups::Tags;
 
@@ -97,6 +98,59 @@ struct Match {
 const INCLUSIVE: bool = true;
 const EXCLUSIVE: bool = false;
 
+// Reads a line from the stock list and give a character
+fn chara_from_string(line: String)
+-> Chara {
+    // fields that depend on the list
+    let mut chara_name: String = String::from("");
+    let mut chara_groups: HashSet<Tags> = HashSet::new();
+    let mut chara_flags: [bool; 4] = [false; 4];
+    for (part, data) in line.split("; ").enumerate() {
+        if part == 0 {
+            // name
+            chara_name = data.to_string();
+        } else if part == 1 {
+            // groups
+            for group in data.split(" ") {
+                chara_groups.insert(Tags::from_str(group).unwrap());
+            }
+        } else {
+            // flags
+            match data {
+                "pc98" => {
+                    chara_flags[0] = true;
+                },
+                "nameless" => {
+                    chara_flags[1] = true;
+                },
+                "notgirl" => {
+                    chara_flags[2] = true;
+                },
+                _ => { println!("???: Unknown flag.") },
+            }
+        }
+    }
+    let touhou = Chara {
+        name: chara_name,
+        rank: Glicko {
+            rate: 1500.0,
+            devi: 350.0,
+            vola: 0.06,
+        },
+        hist: Past {
+            wins: 0,
+            loss: 0,
+            draw: 0,
+            old_rate: VecDeque::with_capacity(7),
+            old_rank: VecDeque::with_capacity(7),
+        },
+        recent: VecDeque::with_capacity(7),
+        groups: chara_groups,
+        flags: chara_flags,
+    };
+    touhou
+}
+
 // Generate the data file from a stock list of characters
 fn generate_data() {
     let start = SystemTime::now();
@@ -109,56 +163,9 @@ fn generate_data() {
     let reader = io::BufReader::new(file);
     for (number, line) in reader.lines().skip(3).enumerate() {
         match line {
-            Ok(input) => {
-                // fields that depend on the list
-                let mut chara_name: String = String::from("");
-                let mut chara_groups: HashSet<Tags> = HashSet::new();
-                let mut chara_flags: [bool; 4] = [false; 4];
-                for (part, data) in input.split("; ").enumerate() {
-                    if part == 0 {
-                        // name
-                        print!("#{}: {}", number + 1, data);
-                        chara_name = data.to_string();
-                    } else if part == 1 {
-                        // groups
-                        for group in data.split(" ") {
-                            chara_groups.insert(Tags::from_str(group).unwrap());
-                        }
-                        println!();
-                    } else {
-                        // flags
-                        match data {
-                            "pc98" => {
-                                chara_flags[0] = true;
-                            },
-                            "nameless" => {
-                                chara_flags[1] = true;
-                            },
-                            "notgirl" => {
-                                chara_flags[2] = true;
-                            },
-                            _ => { println!("???: Unknown flag.") },
-                        }
-                    }
-                }
-                let touhou = Chara {
-                    name: chara_name,
-                    rank: Glicko {
-                        rate: 1500.0,
-                        devi: 350.0,
-                        vola: 0.06,
-                    },
-                    hist: Past {
-                        wins: 0,
-                        loss: 0,
-                        draw: 0,
-                        old_rate: VecDeque::with_capacity(7),
-                        old_rank: VecDeque::with_capacity(7),
-                    },
-                    recent: VecDeque::with_capacity(7),
-                    groups: chara_groups,
-                    flags: chara_flags,
-                };
+            Ok(l) => {
+                let touhou = chara_from_string(l);
+                println!("#{}: {}", number + 1, touhou.name);
                 characters.push(touhou);
             }
             Err(error) => {
@@ -181,7 +188,62 @@ fn generate_data() {
     }
 }
 
-// Update the data file
+// Update the data file to add (not remove) new characters and flags
+fn update_data(touhous: &mut Vec<Chara>) {
+    // todo: error handling
+    let file = File::open("./src/touhous.txt").unwrap();
+    let reader = io::BufReader::new(file);
+    let (mut updated, mut added) = (0, 0);
+    for (_, line) in reader.lines().skip(3).enumerate() {
+        match line {
+            Ok(l) => {
+                if l.is_empty() {
+                    continue;
+                }
+                let tokens: Vec<&str> = l.split("; ").collect();
+                let name = tokens.get(0).unwrap();
+                if let Some(th) = find_mut_exact(touhous, name.to_string()) {
+                    // update
+                    updated += 1;
+                    (th.flags[0], th.flags[1], th.flags[2]) = (false, false, false);
+                    for (part, data) in tokens.iter().enumerate() {
+                        if part == 1 {
+                            for tag in data.split(" ") {
+                                th.groups.insert(Tags::from_str(tag).unwrap());
+                            }
+                        } else if part > 1 {
+                            match *data {
+                                "pc98" => {
+                                    th.flags[0] = true;
+                                },
+                                "nameless" => {
+                                    th.flags[1] = true;
+                                },
+                                "notgirl" => {
+                                    th.flags[2] = true;
+                                },
+                                _ => { println!("???: Unknown flag.") },
+                            }
+                        }
+                    }
+                } else {
+                    // create
+                    added += 1;
+                    let th = chara_from_string(l);
+                    touhous.push(th);
+                }
+            }
+            Err(error) => {
+                eprintln!("\nError reading... {}", error);
+                break;
+            }
+        }
+    }
+    write_data(touhous);
+    println!("Update: {} characters updated, {} characters added.", updated, added);
+}
+
+// Write to the data file
 fn write_data(touhous: &Vec<Chara>) {
     // serialize
     let encoded: Vec<u8> = bincode::serialize(touhous).unwrap();
@@ -256,7 +318,7 @@ fn fight(records: &mut Vec<Match>, fire: &mut Chara, ice: &mut Chara, fire_id: u
     }
 }
 
-// Reset a character
+// Reset a character stat
 fn reset_chara(chara: &mut Chara) {
     *chara = Chara {
         rank: Glicko {
@@ -467,20 +529,41 @@ fn summon<'a>(touhous: &'a mut Vec<&mut Chara>, index1: usize, index2: usize)
 }
 
 // Find a character by name
-// TODO: some characters with short names (like Mai) are unreachable
 fn find(touhous: &Vec<Chara>, query: String)
 -> Option<&Chara> {
+    let matcher = SkimMatcherV2::default();
+    let mut best_match: Option<&Chara> = None;
+    let mut best_score = 0;
     for th in touhous.iter() {
-        if th.name.to_lowercase().contains(&query.to_lowercase()) {
-            return Some(th);
+        if let Some(score) = matcher.fuzzy_match(&th.name, &query) {
+            if score > best_score {
+                best_match = Some(th);
+                best_score = score;
+            }
         }
     }
-    None
+    best_match
 }
 fn find_mut(touhous: &mut Vec<Chara>, query: String)
 -> Option<&mut Chara> {
+    let matcher = SkimMatcherV2::default();
+    let mut best_match: Option<&mut Chara> = None;
+    let mut best_score = 0;
     for th in touhous.iter_mut() {
-        if th.name.to_lowercase().contains(&query.to_lowercase()) {
+        if let Some(score) = matcher.fuzzy_match(&th.name, &query) {
+            if score > best_score {
+                best_match = Some(th);
+                best_score = score;
+            }
+        }
+    }
+    best_match
+}
+// Exact match
+fn find_mut_exact(touhous: &mut Vec<Chara>, query: String)
+-> Option<&mut Chara> {
+    for th in touhous.iter_mut() {
+        if th.name == query {
             return Some(th);
         }
     }
@@ -601,6 +684,7 @@ fn bouncer(line: String, touhous: &mut Vec<Chara>)
 
 // Show detailed stats about a character
 fn stat(chara: &Chara, touhous: &Vec<Chara>, full_rankings: bool) {
+    println!("{:-<1$}", "", 50);
     // Name and overall rank
     let no_tags: Vec<(Tags, bool)> = vec![];
     let everyone = stats::filter_group(no_tags.clone(), touhous);
@@ -615,14 +699,14 @@ fn stat(chara: &Chara, touhous: &Vec<Chara>, full_rankings: bool) {
     println!("==> {}", "RATING".bold());
     println!("{}",
         if chara.rank.devi > 110.0 {
-            format!("    {0:.2} ± {1:.0} | (volatility: {2:.6})",
-                chara.rank.rate,
+            format!("    {} ± {1:.0} | (volatility: {2:.6})",
+                format!("{:.2}", chara.rank.rate).bold(),
                 chara.rank.devi * 1.96,
                 chara.rank.vola
             ).truecolor(182, 185, 191)
         } else {
-            format!("    {0:.2} ± {1:.0} | (volatility: {2:.6})",
-                chara.rank.rate,
+            format!("    {} ± {1:.0} | (volatility: {2:.6})",
+                format!("{:.2}", chara.rank.rate).bold(),
                 chara.rank.devi * 1.96,
                 chara.rank.vola
             ).truecolor(140, 180, 250)
@@ -744,9 +828,8 @@ fn stat(chara: &Chara, touhous: &Vec<Chara>, full_rankings: bool) {
 
 // Show the current rankings up to *first* entries
 fn list(mut touhous: Vec<&Chara>, first: usize, name_filter: &str) {
-    println!("====================== Ranking list ======================");
-    println!("#    Name                      Rating           Volatility");
-    println!("----------------------------------------------------------");
+    println!("#    Name                      Rating                   ");
+    println!("--------------------------------------------------------");
 
     touhous.sort_by(|a, b| b.rank.rate.partial_cmp(&a.rank.rate).unwrap());
 
@@ -777,7 +860,37 @@ fn list(mut touhous: Vec<&Chara>, first: usize, name_filter: &str) {
         }
         // print entry
         count += 1;
-        println!("{0: <4} {1: <26}{2}  {3:.2}",
+        // trend is wrong if any filtering is applied
+        let rk_diff: isize = rank as isize - *touhou.hist.old_rank.back().unwrap() as isize;
+        let trend = format!("{}",
+            if rk_diff.abs() > 5 {
+                format!("{} {}",
+                    if rk_diff.is_positive() {
+                        "🡾".red()
+                    } else {
+                        "🡽".blue()
+                    },
+                    rk_diff.abs()
+                )
+            } else {
+                "".to_string()
+            }
+        );
+        // we want to see if they're number 1 in any groups
+        let mut favorite = "";
+        let mut touhous2: Vec<Chara> = Vec::new();
+        for th in touhous.iter() {
+            touhous2.push(th.clone().clone()); // ??
+        }
+        for tag in touhou.groups.iter() {
+            let group = stats::filter_group(vec![(tag.clone(), INCLUSIVE)], &touhous2);
+            if stats::rank_in_group(touhou, &group).0 == 1 {
+                favorite = "👑";
+                break;
+            }
+        }
+        // final entry
+        let entry = format!("{:<4} {:<26}{}  {} {}",
             format!("{}.", rank),
             touhou.name,
             if touhou.rank.devi > 110.0 {
@@ -791,8 +904,15 @@ fn list(mut touhous: Vec<&Chara>, first: usize, name_filter: &str) {
                     touhou.rank.devi * 1.96
                 ).truecolor(140, 180, 250)
             },
-            touhou.rank.vola * 1000.0
+            trend,
+            favorite.blue()
         );
+        match rank {
+            1 => { println!("{}", entry.truecolor(245, 212, 95)); },
+            2 => { println!("{}", entry.truecolor(180, 245, 212)); },
+            3 => { println!("{}", entry.truecolor(240, 140, 95)); },
+            _ => { println!("{}", entry); },
+        }
     }
     println!();
 }
@@ -805,7 +925,6 @@ fn main()
         Ok(file) => file,
         Err(_) => {
             println!("Data file not found! Creating a new one...");
-            thread::sleep(time::Duration::from_secs(2));
             generate_data();
             File::open("data.bin").unwrap() // surely can't be worse
         }
@@ -818,7 +937,6 @@ fn main()
             println!("Data file not good! Creating a new one...");
             let _ = fs::copy("data.bin", "data.bin.bak");
             println!("The original file saved as 'data.bin.bak'");
-            thread::sleep(time::Duration::from_secs(2));
             generate_data();
             let data_file_again = File::open("data.bin").unwrap();
             let reader_again = BufReader::new(data_file_again);
@@ -847,7 +965,7 @@ fn main()
                         None => String::from_str("").unwrap(),
                     };
                     let mut participants = bouncer(filter_str, &mut touhous);
-                    if (participants.len() < 2) {
+                    if participants.len() < 2 {
                         println!("Cannot start with fewer than 2 participants!");
                         continue;
                     }
@@ -976,6 +1094,8 @@ fn main()
                         }
                         None => { println!("Usage: know [character]"); },
                     }
+                } else if line.starts_with("update") {
+                    update_data(&mut touhous);
                 } else if line.starts_with("e") {
                     break;
                 } else {
@@ -1003,6 +1123,7 @@ fn lobby_help() {
     println!("   'stat!':   even more stats!");
     println!("-- 'reset':   reset the stats of a character.");
     println!("-- 'know':    hide/unhide a character in rankings.");
+    println!("-- 'update':  updates the data file after changes to list");
     println!("-- 'info':    info about the rating system.");
     println!("-- 'help':    Display this message.");
     println!("-- 'exit':    See you next time.");
