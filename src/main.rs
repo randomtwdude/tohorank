@@ -538,7 +538,17 @@ fn parse_filter(line: String)
             &token[..]
         };
         match Tags::from_str(token_unsigned) {
-            Ok(t) => { tags.push((t, !is_excl)); },
+            Ok(t) => {
+                println!("Filter: {} {}",
+                    if is_excl {
+                        "Excluding".red()
+                    } else {
+                        "Including".blue()
+                    },
+                    t.name().bold()
+                );
+                tags.push((t, !is_excl));
+            },
             Err(_) => {
                 match token {
                     t if t.contains("pc98")     => {
@@ -753,7 +763,7 @@ fn list(mut touhous: Vec<&Chara>, first: usize, name_filter: &str) {
                 left += 1;
             }
             if left > 0 {
-                println!("... {} more characaters with the same rank.\n", left);
+                println!("... {} more characaters with the same rank.", left);
             }
             break;
         }
@@ -784,6 +794,7 @@ fn list(mut touhous: Vec<&Chara>, first: usize, name_filter: &str) {
             touhou.rank.vola * 1000.0
         );
     }
+    println!();
 }
 
 fn main()
@@ -892,6 +903,10 @@ fn main()
                         }
                     }
                     let invited = bouncer(tags_filter, &mut touhous);
+                    if invited.len() == 0 {
+                        println!("There's no one here... :(");
+                        continue;
+                    }
                     // I like how this is called "coercion"
                     let invited_immutable: Vec<&Chara> =
                         invited.into_iter().map(|a| &*a).collect();
