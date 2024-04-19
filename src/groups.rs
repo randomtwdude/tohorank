@@ -1,5 +1,5 @@
 // Character groups for detailed stats
-// Generated from tohosort's dataset: 2021-05-09
+// Generated from tohosort's dataset: 2019-11-26
 
 use serde::{Serialize, Deserialize};
 use std::str::FromStr;
@@ -42,7 +42,10 @@ pub enum Tags {
 	HSiFS,
 	VD,
 	WBaWC,
+	ibun,
 	UM,
+	BM100,
+	UDoALG,
 	// Stages
 	st1,
 	st2,
@@ -86,7 +89,10 @@ impl Tags {
 			Tags::HSiFS	=> "Hidden Star in Four Seasons",
 			Tags::VD	=> "Violet Detector",
 			Tags::WBaWC	=> "Wily Beast and Weakest Creature",
+			Tags::ibun	=> "Touhou Gouyoku Ibun",
 			Tags::UM	=> "Unconnected Marketeers",
+			Tags::BM100	=> "100th Black Market",
+			Tags::UDoALG	=> "Unfinished Dream of All Living Ghost",
 			// Stages
 			Tags::st1	=> "Stage 1",
 			Tags::st2	=> "Stage 2",
@@ -129,7 +135,10 @@ impl Tags {
 			Tags::HSiFS	=> "16 - Tenkuushou",
 			Tags::VD	=> "16.5 - Hifuu Nightmare Diary",
 			Tags::WBaWC	=> "17 - Kikeijuu",
+			Tags::ibun	=> "17.5 - Gouyoku Ibun",
 			Tags::UM	=> "18 - Kouryuudou",
+			Tags::BM100	=> "18.5 - Bulletphilia-tachi no Yami-Ichiba",
+			Tags::UDoALG	=> "19 - Unfinished Dream of All Living Ghost",
 			// Stages
 			Tags::st1	=> "",
 			Tags::st2	=> "",
@@ -189,7 +198,10 @@ impl FromStr for Tags {
 			"hsifs"	| "th16"	=> Ok(Tags::HSiFS),
 			"vd"	| "th16.5"	=> Ok(Tags::VD),
 			"wbawc"	| "th17"	=> Ok(Tags::WBaWC),
+			"ibun"	| "th17.5"	=> Ok(Tags::ibun),
 			"um"	| "th18"	=> Ok(Tags::UM),
+			"bm100"	| "th18.5"	=> Ok(Tags::BM100),
+			"udoalg"	| "th19"	=> Ok(Tags::UDoALG),
 			// Stages
 			"st1"	=> Ok(Tags::st1),
 			"st2"	=> Ok(Tags::st2),

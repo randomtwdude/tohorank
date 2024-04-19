@@ -1,17 +1,17 @@
 # This is the character list used by Tohorank to generate its data.
-# Generated from tohosort's dataset: 2021-05-09
+# Generated from tohosort's dataset: 2019-11-26
 
-Hakurei Reimu; book EoSD PCB IaMP IN PoFV StB SWR MoF SA UFO soku DS TD HM DDC ISC ULiL LoLK AoCF HSiFS VD WBaWC UM st4
-Kirisame Marisa; book EoSD PCB IaMP IN PoFV StB SWR MoF SA UFO soku DS GFW TD HM DDC ISC ULiL LoLK AoCF HSiFS VD WBaWC UM st4 ex
+Hakurei Reimu; book EoSD PCB IaMP IN PoFV StB SWR MoF SA UFO soku DS TD HM DDC ISC ULiL LoLK AoCF HSiFS VD WBaWC UM ibun BM100 UDoALG st4
+Kirisame Marisa; book EoSD PCB IaMP IN PoFV StB SWR MoF SA UFO soku DS GFW TD HM DDC ISC ULiL LoLK AoCF HSiFS VD WBaWC UM ibun BM100 UDoALG st4 ex
 Rumia; book EoSD StB HM st1
 Daiyousei; book EoSD st2 ex; nameless
-Cirno; book EoSD PCB PoFV StB soku GFW HM DDC ISC HSiFS st2
+Cirno; book EoSD PCB PoFV StB soku GFW HM DDC ISC HSiFS BM100 st2
 Hong Meiling; book EoSD IaMP StB soku st3
 Koakuma; book EoSD st4; nameless
 Patchouli Knowledge; book EoSD IaMP StB SWR soku HM st4 ex
-Izayoi Sakuya; book EoSD PCB IaMP IN PoFV StB SWR soku HM DDC ISC UM st5 st6
+Izayoi Sakuya; book EoSD PCB IaMP IN PoFV StB SWR soku HM DDC ISC UM BM100 st5 st6
 Remilia Scarlet; book EoSD IaMP IN StB SWR soku HM ISC VD st6
-Flandre Scarlet; book EoSD StB VD ex
+Flandre Scarlet; book EoSD StB VD ibun ex
 Letty Whiterock; book PCB StB HM st1
 Chen; book PCB IaMP StB SWR soku HM st2 ex
 Alice Margatroid; book PCB IaMP IN StB SWR soku HM st3
@@ -19,11 +19,11 @@ Lily White; book PCB PoFV HM HSiFS st4 ex
 Lunasa Prismriver; book PCB PoFV HM AoCF st4
 Merlin Prismriver; book PCB PoFV HM AoCF st4
 Lyrica Prismriver; book PCB PoFV HM AoCF st4
-Konpaku Youmu; book PCB IaMP IN PoFV StB SWR soku TD HM ISC WBaWC st5 st6
+Konpaku Youmu; book PCB IaMP IN PoFV StB SWR soku TD HM ISC WBaWC BM100 st5 st6
 Saigyouji Yuyuko; book PCB IaMP IN StB SWR soku TD HM ISC VD st1 st6
-Yakumo Ran; book PCB IaMP IN StB SWR soku HM VD ex
+Yakumo Ran; book PCB IaMP IN StB SWR soku HM VD UDoALG ex
 Yakumo Yukari; book PCB IaMP IN StB SWR soku HM ISC AoCF VD ex
-Ibuki Suika; book IaMP StB SWR soku DS HM ISC VD st6
+Ibuki Suika; book IaMP StB SWR soku DS HM ISC VD BM100 UDoALG st6
 Wriggle Nightbug; book IN StB HM st1
 Mystia Lorelei; book IN PoFV StB HM st2
 Kamishirasawa Keine; book IN StB HM ISC st3 ex
@@ -35,30 +35,30 @@ Fujiwara no Mokou; book IN StB HM ISC ULiL AoCF VD ex
 Shameimaru Aya; book PoFV StB SWR MoF soku HM ISC HSiFS st4
 Medicine Melancholy; book PoFV StB HM st4
 Kazami Yuuka; book PoFV StB HM st5
-Onozuka Komachi; book PoFV StB SWR soku HM st5
+Onozuka Komachi; book PoFV StB SWR soku HM BM100 st5
 Shiki Eiki, Yamaxanadu; book PoFV StB HM VD st6
 Aki Shizuha; MoF DS HM st1
-Aki Minoriko; MoF DS HM st1
+Aki Minoriko; MoF DS HM BM100 st1
 Kagiyama Hina; MoF DS HM st2
-Kawashiro Nitori; MoF DS HM ISC ULiL AoCF st3
+Kawashiro Nitori; MoF DS HM ISC ULiL AoCF BM100 st3
 Inubashiri Momiji; MoF DS ISC st4
-Kochiya Sanae; MoF SA UFO soku DS TD HM ISC LoLK UM st5 ex
-Yasaka Kanako; MoF soku DS HM ISC VD st6 ex
+Kochiya Sanae; MoF SA UFO soku DS TD HM ISC LoLK UM BM100 UDoALG st5 ex
+Yasaka Kanako; MoF soku DS HM ISC VD ibun st6 ex
 Moriya Suwako; MoF SA soku DS HM ISC VD ex
 Nagae Iku; SWR soku DS HM VD st5
-Hinanawi Tenshi; SWR soku DS HM ISC AoCF VD st6
+Hinanawi Tenshi; SWR soku DS HM ISC AoCF VD BM100 st6
 Kisume; SA DS st1
-Kurodani Yamame; SA DS HM st1
+Kurodani Yamame; SA DS HM ibun st1
 Mizuhashi Parsee; SA DS HM st2
-Hoshiguma Yuugi; SA DS HM st3
+Hoshiguma Yuugi; SA DS HM ibun st3
 Komeiji Satori; SA DS HM VD st4
-Kaenbyou Rin (Orin); SA DS HM st4 st5 st6
-Reiuji Utsuho (Okuu); SA soku DS HM VD st6
+Kaenbyou Rin (Orin); SA DS HM UDoALG st4 st5 st6
+Reiuji Utsuho (Okuu); SA soku DS HM VD ibun st6
 Komeiji Koishi; SA DS HM ULiL AoCF VD ex
-Nazrin; UFO DS HM st1 st5
-Tatara Kogasa; UFO TD DS HM st2 ex
+Nazrin; UFO DS HM UDoALG st1 st5
+Tatara Kogasa; UFO TD DS HM ibun st2 ex
 Kumoi Ichirin; UFO DS HM ULiL AoCF st3
-Murasa Minamitsu; UFO DS HM st4
+Murasa Minamitsu; UFO DS HM ibun st4
 Toramaru Shou; UFO DS HM st5
 Hijiri Byakuren; UFO DS HM ISC ULiL AoCF VD st6
 Houjuu Nue; UFO DS TD HM VD st4 st6 ex
@@ -72,10 +72,10 @@ Kaku Seiga; TD HM ISC st4
 Soga no Tojiko; TD HM st5
 Mononobe no Futo; TD HM ISC ULiL AoCF st5
 Toyosatomimi no Miko; TD HM ISC ULiL AoCF VD st6
-Futatsuiwa Mamizou; TD HM ISC ULiL AoCF VD ex
+Futatsuiwa Mamizou; TD HM ISC ULiL AoCF VD BM100 UDoALG ex
 Hata no Kokoro; book HM ULiL AoCF st6
-Wakasagihime; DDC ISC st1
-Sekibanki; DDC ISC st2
+Wakasagihime; DDC ISC BM100 st1
+Sekibanki; DDC ISC BM100 st2
 Imaizumi Kagerou; DDC ISC st3
 Tsukumo Benben; DDC ISC st4 ex
 Tsukumo Yatsuhashi; DDC ISC st4 ex
@@ -83,37 +83,43 @@ Kijin Seija; DDC ISC st5 st6
 Sukuna Shinmyoumaru; DDC ISC ULiL AoCF VD st6
 Horikawa Raiko; DDC ISC AoCF VD ex
 Usami Sumireko; ULiL AoCF VD st6
-Seiran; LoLK VD st1
+Seiran; LoLK VD UDoALG st1
 Ringo; LoLK VD st2
 Doremy Sweet; LoLK AoCF VD st3 ex
 Kishin Sagume; LoLK VD st4
-Clownpiece; LoLK VD st5
+Clownpiece; LoLK VD BM100 st5
 Junko; LoLK VD st6 ex
 Hecatia Lapislazuli; LoLK VD ex
-Eternity Larva; HSiFS VD st1
-Sakata Nemuno; HSiFS VD st2
-Komano Aunn; HSiFS VD st3
-Yatadera Narumi; HSiFS VD st4
+Eternity Larva; HSiFS VD BM100 st1
+Sakata Nemuno; HSiFS VD BM100 st2
+Komano Aunn; HSiFS VD UDoALG st3
+Yatadera Narumi; HSiFS VD BM100 st4
 Nishida Satono; HSiFS VD st5
 Teireida Mai; HSiFS VD st5
-Matara Okina; HSiFS VD st6 ex
-Yorigami Shion; AoCF st6
-Yorigami Joon; AoCF st6
-Ebisu Eika; WBaWC st1
-Ushizaki Urumi; WBaWC st2
-Niwatari Kutaka; WBaWC st3
-Kicchou Yachie; WBaWC st4
+Matara Okina; HSiFS VD ibun st6 ex
+Yorigami Shion; AoCF ibun st6
+Yorigami Joon; AoCF ibun st6
+Ebisu Eika; WBaWC BM100 st1
+Ushizaki Urumi; WBaWC BM100 st2
+Niwatari Kutaka; WBaWC ibun BM100 st3
+Kicchou Yachie; WBaWC UDoALG st4
 Joutouguu Mayumi; WBaWC st5
 Haniyasushin Keiki; WBaWC st6
-Kurokoma Saki; WBaWC ex
-Goutokuji Mike; UM st1
-Yamashiro Takane; UM st2
+Kurokoma Saki; WBaWC BM100 UDoALG ex
+Goutokuji Mike; UM BM100 st1
+Yamashiro Takane; UM BM100 st2
 Komakusa Sannyo; UM st3
 Tamatsukuri Misumaru; UM st4
-Kudamaki Tsukasa; UM st5 st6 ex
-Iizunamaru Megumu; UM st5
-Tenkyuu Chimata; UM st6
-Himemushi Momoyo; UM ex
+Kudamaki Tsukasa; UM UDoALG BM100 st5 st6 ex
+Iizunamaru Megumu; UM BM100 st5
+Tenkyuu Chimata; UM BM100 st6
+Himemushi Momoyo; UM BM100 ex
+Toutetsu Yuuma; ibun UDoALG st6
+Son Biten; UDoALG st5
+Mitsugashira Enoko; UDoALG st5
+Tenkajin Chiyari; UDoALG st5
+Yomotsu Hisami; UDoALG st5
+Nippaku Zanmu; UDoALG st6
 Hieda no Akyuu; book
 Tokiko; book; nameless
 Reisen (Manga); book
@@ -124,6 +130,7 @@ Usami Renko; book
 Ibaraki Kasen; book ULiL AoCF st5
 Motoori Kosuzu; book
 Okunoda Miyoi; book
+Miyadeguchi Mizuchi; book
 Hakurei Reimu (PC-98); HRtP SoEW PoDD LLS MS st4; pc98
 Shingyoku (Female); HRtP st1
 Mima; HRtP SoEW PoDD MS st3 st5 st6

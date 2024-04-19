@@ -1,8 +1,9 @@
 // Tohorank: tohosort but infinite and with numbers!
+// Version 0.1.0
+// Borrow Checker(tm) approved.
 
-// The code is unbelievably janky, but I've managed to
-// satisfy the borrow checker, for now.
-
+use crate::data::update_data;
+use crate::groups::Tags;
 use std::fs::{self, File};
 use std::collections::{HashSet, VecDeque};
 use std::io::{self, BufReader, Write};
@@ -10,9 +11,8 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use colored::Colorize;
 use rustyline::error::ReadlineError;
-use rustyline::{DefaultEditor, Result};
+use rustyline::{DefaultEditor, Result, history::History};
 use strum::IntoEnumIterator;
-use crate::groups::Tags;
 
 mod glicko;
 mod groups;
@@ -42,8 +42,10 @@ struct Past {
     wins: usize,
     loss: usize,
     draw: usize,
-    old_rate: VecDeque<f64>,   // tracks the rating and rank some sessions ago
+    old_rate: VecDeque<f64>,            // tracks the rating and rank some sessions ago
     old_rank: VecDeque<usize>,
+    peak_rate: Option<(f64, String)>,   // peak rating and time
+    peak_rank: Option<(usize, String)>,
 }
 
 // Character
@@ -69,7 +71,7 @@ impl Chara {
     fn is_not_girl(&self) -> bool {
         self.flags[2]
     }
-    // characters marked "don't know" are hidden
+    // characters marked "don't know" are hidden in rankings
     fn dont_know(&self) -> bool {
         self.flags[3]
     }
@@ -85,19 +87,20 @@ impl Chara {
 // A matchup between two characters
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct Match {
-    one: usize,
+    one: usize, // the global IDs used to address THE Vec<Chara>
     two: usize,
     res: f32,
 }
 
-// for tags
-const INCLUSIVE: bool = true;
+const INCLUSIVE: bool = true; // for handling tags
+const DEVIATION_BAR: f64 = 160.0; // threshold for "high deviation"
 
 fn lobby_help() {
     println!("-- 'start':   start a new session.");
     println!("-- 'list':    show the ranking list.");
     println!("-- 'stat':    see stats of a character.");
     println!("   'stat!':   even more stats!");
+    println!("-------------------------------------");
     println!("-- 'reset':   reset the stats of a character.");
     println!("-- 'know':    hide/unhide a character in rankings.");
     println!("-- 'update':  updates the data file");
@@ -109,7 +112,7 @@ fn lobby_help() {
 fn main()
 -> Result<()> {
     let mut rng = rand::thread_rng();
-    // read data
+    // open the data file
     let data_file = match File::open("data.bin") {
         Ok(file) => file,
         Err(_) => {
@@ -119,7 +122,7 @@ fn main()
         }
     };
     let reader = BufReader::new(data_file);
-    // all the touhous
+    // read all the touhous into memory
     let mut touhous: Vec<Chara> = match bincode::deserialize_from(reader) {
         Ok(ths) => ths,
         Err(_) => {
@@ -136,12 +139,15 @@ fn main()
     let mut records: Vec<Match> = Vec::new();
 
     println!("Reading data file complete, got {} chracters.", souls_onboard);
-    println!("======~ Tohorank: Lobby ~======");
+    update_data(&mut touhous); // why not auto-update
+
+    println!("=========~ Tohorank: Lobby ~=========");
     lobby_help();
 
     let mut rl = DefaultEditor::new()?;
     loop {
         rl.load_history("history.txt").ok();
+        rl.history_mut().set_max_len(100).ok();
         let readline = rl.readline("Lobby >> ");
 
         match readline {
@@ -152,7 +158,8 @@ fn main()
                         Some((_, f)) => { f.trim().to_owned() },
                         None => String::from_str("").unwrap(),
                     };
-                    let mut participants = sort::bouncer(filter_str, &mut touhous);
+                    // indices: global ID of participants (relative to the entire character vector)
+                    let (mut participants, indices) = sort::bouncer(filter_str, &mut touhous);
                     if participants.len() < 2 {
                         println!("Cannot start with fewer than 2 participants!");
                         continue;
@@ -160,15 +167,22 @@ fn main()
                     println!("{}",
                         format!("=== Starting a new session with {} characters... ===", participants.len()).blue()
                     );
-                    let mut pair_id = sort::matchmake(&mut rng, &participants, 500);
+                    // keep track of the players picked because they haven't gotten a chance yet
+                    // so we don't keep picking them (the record is only written after this session ends)
+                    let mut picks: HashSet<usize> = HashSet::with_capacity(participants.len());
+                    let mut pair_id = sort::matchmake(&mut rng, &participants, 500, &mut picks);
                     loop {
                         let (one, two, id_one, id_two) = chara::summon(&mut participants, pair_id[0], pair_id[1]);
-                        match sort::fight(&mut records, one, two, id_one, id_two) {
+                        match sort::fight(&mut records, one, two, indices[id_one], indices[id_two]) {
                             FightCond::Next => {
-                                pair_id = sort::matchmake(&mut rng, &participants, 500);
+                                pair_id = sort::matchmake(&mut rng, &participants, 500, &mut picks);
                             }
                             FightCond::Undo => {
-                                pair_id = vec![records[records.len() - 1].one, records[records.len() - 1].two];
+                                // map global id (in records) -> participant id (for summon)
+                                let (global_id1, global_id2) = (records.last().unwrap().one, records.last().unwrap().two);
+                                let participant_id1 = indices.iter().position(|a| *a == global_id1).unwrap();
+                                let participant_id2 = indices.iter().position(|a| *a == global_id2).unwrap();
+                                pair_id = vec![participant_id1, participant_id2];
                                 records.pop();
                             }
                             FightCond::Last => {
@@ -182,7 +196,7 @@ fn main()
                     }
                 } else if line.starts_with("l") {
                     // list!
-                    let mut how_many = 10;
+                    let mut how_many = 25;
                     let mut name_filter = "".to_owned();
                     let mut tags_filter = "".to_owned();
                     for token in line.trim().split(" ").skip(1) {
@@ -196,6 +210,7 @@ fn main()
                             } else {
                                 &token[..]
                             };
+                            // todo: flags should work too
                             match Tags::from_str(token_unsigned) {
                                 Ok(_) => {
                                     // is a tag, add it to filter
@@ -208,12 +223,12 @@ fn main()
                             }
                         }
                     }
-                    let invited = sort::bouncer(tags_filter, &mut touhous);
+                    // drop the indices since we don't need it here
+                    let (invited, _) = sort::bouncer(tags_filter, &mut touhous);
                     if invited.len() == 0 {
                         println!("There's no one here... :(");
                         continue;
                     }
-                    // I like how this is called "coercion"
                     let invited_immutable: Vec<&Chara> =
                         invited.into_iter().map(|a| &*a).collect();
                     list(invited_immutable, how_many, name_filter.trim());
@@ -284,7 +299,8 @@ fn main()
                     data::update_data(&mut touhous);
                 } else if line.starts_with("tags") {
                     println!("List of all filter tags:");
-                    println!("You can also specify by number like 'th06'\n");
+                    println!("Add '-' to the front to exclude them instead.");
+                    println!("You can also specify by the number like 'th06'\n");
                     for tag in Tags::iter() {
                         if tag.is_series_tag() {
                             println!("{:<8}{} ~ {}", format!("{:?}", tag), tag.exname(), tag.name());
@@ -331,7 +347,7 @@ fn stat(chara: &Chara, touhous: &Vec<Chara>, full_rankings: bool) {
     // Rating information
     println!("==> {}", "RATING".bold());
     println!("{}",
-        if chara.rank.devi > 110.0 {
+        if chara.rank.devi > DEVIATION_BAR {
             format!("    {} ± {1:.0} | (volatility: {2:.6})",
                 format!("{:.2}", chara.rank.rate).bold(),
                 chara.rank.devi * 1.96,
@@ -345,7 +361,7 @@ fn stat(chara: &Chara, touhous: &Vec<Chara>, full_rankings: bool) {
             ).truecolor(140, 180, 250)
         }
     );
-    if chara.rank.devi > 110.0 {
+    if chara.rank.devi > DEVIATION_BAR {
         println!("    ⓘ The uncertainty is high, do more battles!\n");
     }
 
@@ -401,6 +417,14 @@ fn stat(chara: &Chara, touhous: &Vec<Chara>, full_rankings: bool) {
             }
         );
     }
+    // Peaks
+    if let Some((prk, prk_time)) = &chara.hist.peak_rank {
+        println!("\n    Highest rank: #{} on {}", prk, prk_time);
+    }
+    if let Some((prt, prt_time)) = &chara.hist.peak_rate {
+        println!("    Highest rating: {:.0} on {}", prt, prt_time);
+    }
+
 
     // Rank informations
     println!("\n==> {}", "RANKINGS".bold());
@@ -462,12 +486,14 @@ fn stat(chara: &Chara, touhous: &Vec<Chara>, full_rankings: bool) {
             }
         );
     }
+    println!();
 }
 
 // Show the current rankings up to *first* entries
 fn list(mut touhous: Vec<&Chara>, first: usize, name_filter: &str) {
-    println!("#    Name                      Rating                   ");
-    println!("--------------------------------------------------------");
+    println!("------------------------------------------------------");
+    println!("#    Name                      Rating           Extra ");
+    println!("------------------------------------------------------");
 
     touhous.sort_by(|a, b| b.rank.rate.partial_cmp(&a.rank.rate).unwrap());
 
@@ -499,7 +525,11 @@ fn list(mut touhous: Vec<&Chara>, first: usize, name_filter: &str) {
         // print entry
         count += 1;
         // trend is wrong if any filtering is applied
-        let rk_diff: isize = rank as isize - *touhou.hist.old_rank.back().unwrap() as isize;
+        let rk_diff: isize = if touhou.hist.old_rank.len() > 0 {
+            rank as isize - *touhou.hist.old_rank.back().unwrap() as isize
+        } else {
+            0
+        };
         let trend = format!("{}",
             if rk_diff.abs() > 5 {
                 format!("{}",
@@ -523,7 +553,7 @@ fn list(mut touhous: Vec<&Chara>, first: usize, name_filter: &str) {
         for tag in touhou.groups.iter() {
             let group = stats::filter_group(vec![(tag.clone(), INCLUSIVE)], &touhous2);
             if stats::rank_in_group(touhou, &group).0 == 1 {
-                favorite = "👑 ";
+                favorite = "★ ";
                 break;
             }
         }
@@ -531,7 +561,7 @@ fn list(mut touhous: Vec<&Chara>, first: usize, name_filter: &str) {
         let entry = format!("{:<4} {:<26}{}  {}{}",
             format!("{}.", rank),
             touhou.name,
-            if touhou.rank.devi > 110.0 {
+            if touhou.rank.devi > DEVIATION_BAR {
                 format!("({0: <7} ± {1:.0})",
                     format!("{:.2}", touhou.rank.rate).bold(),
                     touhou.rank.devi * 1.96

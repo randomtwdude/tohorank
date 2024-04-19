@@ -1,11 +1,12 @@
 // Functions relating to characters
 
-use crate::{Chara, Glicko, Past, Match};
+use crate::{Chara, Glicko, Past, Match, data};
 use std::collections::VecDeque;
+use chrono::Local;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 
-// Reset a character stat
+// Reset a character stats
 pub fn reset(chara: &mut Chara) {
     *chara = Chara {
         rank: Glicko {
@@ -19,13 +20,15 @@ pub fn reset(chara: &mut Chara) {
             draw: 0,
             old_rank: VecDeque::with_capacity(7),
             old_rate: VecDeque::with_capacity(7),
+            peak_rate: None,
+            peak_rank: None,
         },
         recent: VecDeque::with_capacity(7),
         ..chara.clone()
     };
 }
 
-// Updates the history records for each character
+// Updates the history records for each character involved
 pub fn update_history(touhous: &mut Vec<Chara>, records: &Vec<Match>) {
     // fumos are references to touhous, right
     let mut fumos: Vec<&mut Chara> = Vec::with_capacity(touhous.len());
@@ -42,13 +45,28 @@ pub fn update_history(touhous: &mut Vec<Chara>, records: &Vec<Match>) {
             rank += 1;
             last_rating = fumo.rank.rate;
         }
-        // max 7 historical entries
-        if fumo.hist.old_rank.len() >= 7 {
+        // max historical entries
+        if fumo.hist.old_rank.len() >= data::MAX_HISTORY_SESS {
             fumo.hist.old_rank.pop_back();
             fumo.hist.old_rate.pop_back();
         }
         fumo.hist.old_rank.push_front(rank);
         fumo.hist.old_rate.push_front(fumo.rank.rate);
+        // update peak rating/rank
+        // but only after there has been 5 sessions
+        if fumo.hist.old_rank.len() >= 5 {
+            let today = Local::now().format("%d %b, %Y").to_string();
+            if fumo.hist.peak_rank == None
+               || fumo.hist.peak_rank.as_ref().unwrap().0 > rank
+            {
+                fumo.hist.peak_rank = Some((rank, today.clone()));
+            }
+            if fumo.hist.peak_rate == None
+               || fumo.hist.peak_rate.as_ref().unwrap().0 < fumo.rank.rate
+            {
+                fumo.hist.peak_rate = Some((fumo.rank.rate, today));
+            }
+        }
     }
 
     // update win/loss/draw and recent battles
@@ -74,10 +92,10 @@ pub fn update_history(touhous: &mut Vec<Chara>, records: &Vec<Match>) {
             _ => { println!("update_history: ???"); },
         }
         // recent battles
-        if touhous[battle.one].recent.len() >= 7 {
+        if touhous[battle.one].recent.len() >= data::MAX_HISTORY_SESS {
             touhous[battle.one].recent.pop_back();
         }
-        if touhous[battle.two].recent.len() >= 7 {
+        if touhous[battle.two].recent.len() >= data::MAX_HISTORY_SESS {
             touhous[battle.two].recent.pop_back();
         }
         touhous[battle.one].recent.push_front(battle.clone());
@@ -85,19 +103,20 @@ pub fn update_history(touhous: &mut Vec<Chara>, records: &Vec<Match>) {
     }
 }
 
-// Summons the mutable reference to the two characters at index1,2 (no bound check)
+// Summons the mutable reference to the two characters at index1,2
+// Note: make sure the index are in bound
 pub fn summon<'a>(touhous: &'a mut Vec<&mut Chara>, index1: usize, index2: usize)
 -> (&'a mut Chara, &'a mut Chara, usize, usize) {
     if index1 > index2 {
         let (a, b) = touhous.split_at_mut(index1);
-        (&mut *a[index2], &mut *b[0], index2, index1)
+        (&mut *b[0], &mut *a[index2], index1, index2)
     } else {
         let (a, b) = touhous.split_at_mut(index2);
         (&mut *a[index1], &mut *b[0], index1, index2)
     }
 }
 
-// Find a character by name
+// Find a character by name, fuzzy search
 pub fn find(touhous: &Vec<Chara>, query: String)
 -> Option<&Chara> {
     let matcher = SkimMatcherV2::default();

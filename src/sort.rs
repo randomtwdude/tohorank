@@ -3,8 +3,10 @@
 use crate::{Match, Chara, FightCond, groups::Tags, stats};
 use std::io::{self, Write};
 use std::str::FromStr;
-use rand::rngs::ThreadRng;
+use std::collections::HashSet;
 use colored::Colorize;
+use rand::rngs::ThreadRng;
+use rand::seq::IteratorRandom;
 
 // One battle, may add an entry to *records*
 pub fn fight(records: &mut Vec<Match>, fire: &mut Chara, ice: &mut Chara, fire_id: usize, ice_id: usize)
@@ -24,22 +26,22 @@ pub fn fight(records: &mut Vec<Match>, fire: &mut Chara, ice: &mut Chara, fire_i
             res: 1.0,
         };
 
-        if choice.starts_with('1') {
+        if choice.ends_with('1') {
             // I like left
             println!("Chose - {}!", fire.name.blue());
-        } else if choice.starts_with('2') {
+        } else if choice.ends_with('2') {
             // I like right
             game.res = 0.0;
             println!("Chose - {}!", ice.name.blue());
-        } else if choice.starts_with('d') {
+        } else if choice.ends_with('d') {
             // I dislike them both! (special value)
             game.res = 2.0;
             println!("Disliked both!");
-        } else if choice.starts_with('e') {
+        } else if choice.starts_with("end") {
             // End
             println!("Finishing rating period...");
             return FightCond::Last;
-        } else if choice.starts_with('u') {
+        } else if choice.ends_with('l') {
             // Undo
             if records.len() == 0 {
                 println!("This is the first battle!");
@@ -47,13 +49,13 @@ pub fn fight(records: &mut Vec<Match>, fire: &mut Chara, ice: &mut Chara, fire_i
             }
             println!("Going back...");
             return FightCond::Undo;
-        } else if choice.starts_with('h') {
+        } else if choice.ends_with('h') {
             // Help
             println!("1/2 to choose left/right");
             println!("<Enter> for draws");
             println!("d if you DISLIKE BOTH of them");
-            println!("u to undo");
-            println!("e to end this session");
+            println!("l to undo");
+            println!("\"end\" to end this session");
             continue;
         } else {
             game.res = 0.5;
@@ -66,14 +68,32 @@ pub fn fight(records: &mut Vec<Match>, fire: &mut Chara, ice: &mut Chara, fire_i
 }
 
 // Skill-based matchmaking? (best effort)
-pub fn matchmake(rng: &mut ThreadRng, pool: &Vec<&mut Chara>, threshold: usize)
+pub fn matchmake(rng: &mut ThreadRng, pool: &Vec<&mut Chara>, threshold: usize,
+    unranked_picks: &mut HashSet<usize>)
 -> Vec<usize> {
     let pool_size = pool.len();
+    // when some character hasn't had a match yet, we ensure one of them is included
+    // getting everyone off the start quickly
+    let mut unranked_pool = pool.iter().enumerate().filter(|(n, a)| {
+        a.hist.wins + a.hist.draw + a.hist.loss == 0 && !unranked_picks.contains(n)
+    }).peekable();
+    if unranked_pool.peek().is_some() {
+        let one = unranked_pool.choose(rng).unwrap().0;
+        let mut pair_id = rand::seq::index::sample(rng, pool_size, 1).into_vec();
+        while pair_id[0] == one {
+            pair_id[0] = rand::seq::index::sample(rng, pool_size, 1).index(0);
+        }
+        pair_id.push(one);
+        unranked_picks.insert(one);
+        return pair_id;
+    }
+
+    // regular matchmaker
     let mut pair_id = rand::seq::index::sample(rng, pool_size, 2).into_vec();
-    // 2^63-1 characters ought to be enough for every fandom
     let mut tries = 0;
-    while tries < 20 ||
-          (pair_id[1] as isize - pair_id[0] as isize).abs() > threshold as isize {
+    while tries < 20
+          || (pair_id[1] as isize - pair_id[0] as isize).abs() > threshold as isize
+    {
         pair_id = rand::seq::index::sample(rng, pool_size, 2).into_vec();
         tries += 1;
     }
@@ -158,13 +178,13 @@ pub fn parse_filter(line: String)
     (tags, flags)
 }
 
-// Parses tags and generates the pool of contestants
+// Takes tags and generates the pool of contestants
 // Consumes: line
 pub fn bouncer(line: String, touhous: &mut Vec<Chara>)
--> Vec<&mut Chara> {
+-> (Vec<&mut Chara>, Vec<usize>) {
     // filter by tags
     let (tags, flags): (Vec<(Tags, bool)>, [bool; 3]) = parse_filter(line);
-    let mut filtered: Vec<&mut Chara> = stats::filter_group_mut(tags, touhous);
+    let (mut filtered, mut indices): (Vec<&mut Chara>,_) = stats::filter_group_mut(tags, touhous);
     // filter by flags (pc98, nongirls, nameless)
     // flags[]: remove if 0
     let flag_filter = |a: &&mut Chara| {
@@ -172,7 +192,17 @@ pub fn bouncer(line: String, touhous: &mut Vec<Chara>)
             || !flags[1] && a.is_not_girl()
             || !flags[2] && a.is_nameless())
     };
-    filtered.retain(flag_filter);
+    // we want to filter both filtered() and indices() at once
+    let to_remove: Vec<usize> = filtered.iter().enumerate()
+        .filter(|(_, &ref th)| !flag_filter(&th) /* remove if false */)
+        .map(|(id, _)| id)
+        .collect();
+    let mut offset = 0;
+    for id in to_remove {
+        filtered.remove(id - offset);
+        indices.remove(id - offset);
+        offset += 1; // as we remove the index is shifted
+    }
     // final pool
-    filtered
+    (filtered, indices)
 }

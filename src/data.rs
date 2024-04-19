@@ -1,6 +1,6 @@
 // Functions for manipulating the data file
 
-use crate::{chara::find_mut_exact, Glicko, Past, groups::Tags, Chara};
+use crate::{chara, Chara, Glicko, Past, groups::Tags};
 use std::collections::HashSet;
 use std::str::FromStr;
 use std::collections::VecDeque;
@@ -8,6 +8,8 @@ use std::fs::File;
 use std::time::SystemTime;
 use std::io::{self, Write, BufRead, BufWriter};
 use std::process;
+
+pub static MAX_HISTORY_SESS: usize = 7;
 
 // Reads a line from the stock list and give a character
 pub fn chara_from_string(line: String)
@@ -52,10 +54,12 @@ pub fn chara_from_string(line: String)
             wins: 0,
             loss: 0,
             draw: 0,
-            old_rate: VecDeque::with_capacity(7),
-            old_rank: VecDeque::with_capacity(7),
+            old_rate: VecDeque::with_capacity(MAX_HISTORY_SESS),
+            old_rank: VecDeque::with_capacity(MAX_HISTORY_SESS),
+            peak_rate: None,
+            peak_rank: None,
         },
-        recent: VecDeque::with_capacity(7),
+        recent: VecDeque::with_capacity(MAX_HISTORY_SESS),
         groups: chara_groups,
         flags: chara_flags,
     };
@@ -66,7 +70,7 @@ pub fn chara_from_string(line: String)
 pub fn generate_data() {
     let start = SystemTime::now();
     // character array
-    let mut characters: Vec<Chara> = Vec::with_capacity(163);
+    let mut characters: Vec<Chara> = Vec::with_capacity(170);
 
     // read from touhous.txt
     let mut err = false;
@@ -99,7 +103,7 @@ pub fn generate_data() {
     }
 }
 
-// Update the data file to add (not remove) new characters and flags
+// Update the data file to add (not remove!) new characters and flags
 pub fn update_data(touhous: &mut Vec<Chara>) {
     // todo: error handling
     let file = File::open("./src/touhous.txt").unwrap();
@@ -113,7 +117,7 @@ pub fn update_data(touhous: &mut Vec<Chara>) {
                 }
                 let tokens: Vec<&str> = l.split("; ").collect();
                 let name = tokens.get(0).unwrap();
-                if let Some(th) = find_mut_exact(touhous, name.to_string()) {
+                if let Some(th) = chara::find_mut_exact(touhous, name.to_string()) {
                     // update
                     updated += 1;
                     (th.flags[0], th.flags[1], th.flags[2]) = (false, false, false);
@@ -158,8 +162,7 @@ pub fn update_data(touhous: &mut Vec<Chara>) {
 pub fn write_data(touhous: &Vec<Chara>) {
     // serialize
     let encoded: Vec<u8> = bincode::serialize(touhous).unwrap();
-
-    // save to data file
+    // save
     let data_file = File::create("data.bin").unwrap();
     let mut writer = BufWriter::new(data_file);
     writer.write_all(&encoded).unwrap();

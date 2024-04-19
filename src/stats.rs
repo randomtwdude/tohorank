@@ -1,4 +1,5 @@
 // Functions for the statistics feature
+
 use crate::{Chara, Tags};
 use colored::Colorize;
 
@@ -12,7 +13,7 @@ pub fn rank_in_group(touhou: &Chara, pool: &Vec<&Chara>)
             rank += 1;
         }
     }
-    (rank, pool.iter().filter(|t| !t.dont_know()).collect::<Vec<_>>().len())
+    (rank, pool.iter().filter(|t| !t.dont_know()).count())
 }
 
 // Filter characters in pool by tags
@@ -51,12 +52,18 @@ pub fn filter_group<'a>(tags: Vec<(Tags, bool)>, pool: &'a Vec<Chara>)
     // final result
     filtered
 }
-// Same as above but returns mutable references
-pub fn filter_group_mut<'a>(tags: Vec<(Tags, bool)>, pool: &'a mut Vec<Chara>) -> Vec<&'a mut Chara> {
+
+// Same as above but returns mutable references, for sorting
+// this one also returns a mapping of filtered indices to the unfiltered indices
+// for storage in Match records
+pub fn filter_group_mut<'a>(tags: Vec<(Tags, bool)>, pool: &'a mut Vec<Chara>)
+-> (Vec<&'a mut Chara>, Vec<usize>) {
     let mut filtered: Vec<&mut Chara> = Vec::new();
+    let mut indices: Vec<usize> = Vec::with_capacity(filtered.len());
+    // separate the tags
     let (series_t, stages_t): (Vec<_>, Vec<_>) = tags.into_iter().
         partition(|a| a.0.is_series_tag());
-    for th in pool.iter_mut() {
+    for (id, th) in pool.iter_mut().enumerate() {
         let no_specified_incl_tags = series_t.iter().filter(|a| a.1).collect::<Vec<_>>().is_empty();
         let has_any_incl_tags = series_t.iter().filter(|a| a.1).any(|tag| th.has_tag(&tag.0));
         let has_no_excl_tags = series_t.iter().filter(|a| !a.1).all(|tag| !th.has_tag(&tag.0));
@@ -65,6 +72,7 @@ pub fn filter_group_mut<'a>(tags: Vec<(Tags, bool)>, pool: &'a mut Vec<Chara>) -
            || (no_specified_incl_tags || has_any_incl_tags) && has_no_excl_tags
         {
             filtered.push(th);
+            indices.push(id);
         }
     }
     let stage_filter = |th: &&mut Chara| {
@@ -75,8 +83,18 @@ pub fn filter_group_mut<'a>(tags: Vec<(Tags, bool)>, pool: &'a mut Vec<Chara>) -
         stages_t.is_empty()
            || (no_specified_incl_tags || has_any_incl_tags) && has_no_excl_tags
     };
-    filtered.retain(stage_filter);
-    filtered
+    // we want to filter both filtered() and indices() at once
+    let to_remove: Vec<usize> = filtered.iter().enumerate()
+        .filter(|(_, &ref th)| !stage_filter(&th) /* remove if false */)
+        .map(|(id, _)| id)
+        .collect();
+    let mut offset = 0;
+    for id in to_remove {
+        filtered.remove(id - offset);
+        indices.remove(id - offset);
+        offset += 1; // as we remove the index is shifted
+    }
+    (filtered, indices)
 }
 
 // Get slice of ranking around character in a group
