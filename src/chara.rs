@@ -105,14 +105,14 @@ pub fn update_history(touhous: &mut Vec<Chara>, records: &Vec<Match>) {
 
 // Summons the mutable reference to the two characters at index1,2
 // Note: make sure the index are in bound
-pub fn summon<'a>(touhous: &'a mut Vec<&mut Chara>, index1: usize, index2: usize)
--> (&'a mut Chara, &'a mut Chara, usize, usize) {
+pub fn summon<'a>(touhous: &'a mut Vec<&mut Chara>, index1: &usize, index2: &usize)
+-> (&'a mut Chara, &'a mut Chara) {
     if index1 > index2 {
-        let (a, b) = touhous.split_at_mut(index1);
-        (&mut *b[0], &mut *a[index2], index1, index2)
+        let (a, b) = touhous.split_at_mut(*index1);
+        (&mut *b[0], &mut *a[*index2])
     } else {
-        let (a, b) = touhous.split_at_mut(index2);
-        (&mut *a[index1], &mut *b[0], index1, index2)
+        let (a, b) = touhous.split_at_mut(*index2);
+        (&mut *a[*index1], &mut *b[0])
     }
 }
 

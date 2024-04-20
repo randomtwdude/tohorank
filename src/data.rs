@@ -8,6 +8,7 @@ use std::fs::File;
 use std::time::SystemTime;
 use std::io::{self, Write, BufRead, BufWriter};
 use std::process;
+use std::path::PathBuf;
 
 pub static MAX_HISTORY_SESS: usize = 7;
 
@@ -66,15 +67,19 @@ pub fn chara_from_string(line: String)
     touhou
 }
 
-// Generate the data file from a stock list of characters
-pub fn generate_data() {
+// Generate the data file from a stock list of characters (~/.tohorank/touhous.txt)
+pub fn generate_data(data_path: &PathBuf) {
     let start = SystemTime::now();
     // character array
     let mut characters: Vec<Chara> = Vec::with_capacity(170);
 
     // read from touhous.txt
+    let mut touhous_path = data_path.clone();
+    touhous_path.pop();
+    touhous_path.push("touhous.txt");
+
     let mut err = false;
-    let file = File::open("./src/touhous.txt").unwrap();
+    let file = File::open(&touhous_path).unwrap();
     let reader = io::BufReader::new(file);
     for (number, line) in reader.lines().skip(3).enumerate() {
         match line {
@@ -90,7 +95,7 @@ pub fn generate_data() {
             }
         }
     }
-    write_data(&characters);
+    write_data(&characters, data_path);
     if err {
         println!("Data file generation INCOMPLETE! Something's gone wrong.");
         process::exit(1);
@@ -104,9 +109,12 @@ pub fn generate_data() {
 }
 
 // Update the data file to add (not remove!) new characters and flags
-pub fn update_data(touhous: &mut Vec<Chara>) {
-    // todo: error handling
-    let file = File::open("./src/touhous.txt").unwrap();
+pub fn update_data(touhous: &mut Vec<Chara>, data_path: &PathBuf) {
+    let mut touhous_path = data_path.clone();
+    touhous_path.pop();
+    touhous_path.push("touhous.txt");
+
+    let file = File::open(&touhous_path).unwrap();
     let reader = io::BufReader::new(file);
     let (mut updated, mut added) = (0, 0);
     for (_, line) in reader.lines().skip(3).enumerate() {
@@ -154,16 +162,16 @@ pub fn update_data(touhous: &mut Vec<Chara>) {
             }
         }
     }
-    write_data(touhous);
+    write_data(touhous, data_path);
     println!("Update: {} characters updated, {} characters added.", updated, added);
 }
 
 // Write to the data file
-pub fn write_data(touhous: &Vec<Chara>) {
+pub fn write_data(touhous: &Vec<Chara>, data_path: &PathBuf) {
     // serialize
     let encoded: Vec<u8> = bincode::serialize(touhous).unwrap();
     // save
-    let data_file = File::create("data.bin").unwrap();
+    let data_file = File::create(data_path).unwrap();
     let mut writer = BufWriter::new(data_file);
     writer.write_all(&encoded).unwrap();
 }

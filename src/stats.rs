@@ -3,7 +3,7 @@
 use crate::{Chara, Tags};
 use colored::Colorize;
 
-// Get the ranking in a group
+// Get the ranking of a character in the pool
 pub fn rank_in_group(touhou: &Chara, pool: &Vec<&Chara>)
 -> (usize, usize) {
     let mut rank = 1;
@@ -17,8 +17,7 @@ pub fn rank_in_group(touhou: &Chara, pool: &Vec<&Chara>)
 }
 
 // Filter characters in pool by tags
-// Every tag is inclusive (true) or exclusive (false)
-// .0 is the tag, .1 is the inclusive/exclusive bit
+// Every tag is either inclusive (true) or exclusive (false)
 pub fn filter_group<'a>(tags: Vec<(Tags, bool)>, pool: &'a Vec<Chara>)
 -> Vec<&'a Chara> {
     let mut filtered: Vec<&Chara> = Vec::new();
@@ -54,13 +53,11 @@ pub fn filter_group<'a>(tags: Vec<(Tags, bool)>, pool: &'a Vec<Chara>)
 }
 
 // Same as above but returns mutable references, for sorting
-// this one also returns a mapping of filtered indices to the unfiltered indices
-// for storage in Match records
+// also returns a mapping of filtered indices to unfiltered indices
 pub fn filter_group_mut<'a>(tags: Vec<(Tags, bool)>, pool: &'a mut Vec<Chara>)
 -> (Vec<&'a mut Chara>, Vec<usize>) {
     let mut filtered: Vec<&mut Chara> = Vec::new();
     let mut indices: Vec<usize> = Vec::with_capacity(filtered.len());
-    // separate the tags
     let (series_t, stages_t): (Vec<_>, Vec<_>) = tags.into_iter().
         partition(|a| a.0.is_series_tag());
     for (id, th) in pool.iter_mut().enumerate() {
@@ -83,7 +80,8 @@ pub fn filter_group_mut<'a>(tags: Vec<(Tags, bool)>, pool: &'a mut Vec<Chara>)
         stages_t.is_empty()
            || (no_specified_incl_tags || has_any_incl_tags) && has_no_excl_tags
     };
-    // we want to filter both filtered() and indices() at once
+    // we want to filter both filtered() and indices() at once, so retain() doesn't cut it
+    // or maybe it does and I'm just bad.
     let to_remove: Vec<usize> = filtered.iter().enumerate()
         .filter(|(_, &ref th)| !stage_filter(&th) /* remove if false */)
         .map(|(id, _)| id)
@@ -97,7 +95,7 @@ pub fn filter_group_mut<'a>(tags: Vec<(Tags, bool)>, pool: &'a mut Vec<Chara>)
     (filtered, indices)
 }
 
-// Get slice of ranking around character in a group
+// Get slice of ranking around the character in a group
 pub fn rank_slice_by_chara<'a>(chara: &'a Chara, pool: &'a Vec<&'a Chara>)
 -> Vec<&'a Chara> {
     let mut poolc = pool.clone();
@@ -109,14 +107,11 @@ pub fn rank_slice_by_chara<'a>(chara: &'a Chara, pool: &'a Vec<&'a Chara>)
             for (n, th) in poolc.iter().enumerate() {
                 if chara.name == th.name {
                     if n == 0 {
-                        // top
-                        return vec![poolc[0], poolc[1], poolc[2]];
+                        return vec![poolc[0], poolc[1], poolc[2]];          // top
                     } else if n == poolc.len() - 1 {
-                        // bottom
-                        return vec![poolc[n - 2], poolc[n - 1], poolc[n]];
+                        return vec![poolc[n - 2], poolc[n - 1], poolc[n]];  // bottom
                     } else {
-                        // middle
-                        return vec![poolc[n - 1], poolc[n], poolc[n + 1]];
+                        return vec![poolc[n - 1], poolc[n], poolc[n + 1]];  // middle
                     }
                 }
             }
@@ -125,13 +120,13 @@ pub fn rank_slice_by_chara<'a>(chara: &'a Chara, pool: &'a Vec<&'a Chara>)
     }
 }
 
-// Print rankings in stats, takes one tag
+// Prints group rankings in stats screen, takes one tag, it only displays one
 pub fn print_rank_in_group(chara: &Chara, tag: Vec<(Tags, bool)>, pool: &Vec<Chara>) {
     // borrow checker complaining? just clone() !
     let group = filter_group(tag.clone(), pool);
     let rank = rank_in_group(chara, &group);
     // title
-    println!("\n  - {:<34}{:>8}",
+    println!("\n  - {:<42}{:>8}",
         if tag.len() > 0 {
             if tag[0].0.exname() != "" {
                 format!("in TH{}", tag[0].0.exname())
@@ -145,21 +140,23 @@ pub fn print_rank_in_group(chara: &Chara, tag: Vec<(Tags, bool)>, pool: &Vec<Cha
     );
     // more title
     if tag.len() > 0 && tag[0].0.exname() != "" {
-        println!("    {:^42}", tag[0].0.name().bold());
+        println!("    {:^50}", tag[0].0.name().bold());
     }
-    println!("    {:-<42}", "");
+    println!("    {:-<50}", "");
     let rank_list = rank_slice_by_chara(chara, &group);
     for th in rank_list.iter() {
         let rank = rank_in_group(th, &group).0;
-        let entry = format!("    {0: <4} {1: <26} {2} ± {3:.0}",
+        let entry = format!("    {:<4} {:<34} {:>10}",
             format!("{}.", rank),
             if th.name == chara.name {
                 th.name.bold()
             } else {
                 th.name.normal()
             },
-            format!("{:.0}", th.rank.rate).bold(),
-            th.rank.devi * 1.96
+            format!("{} ± {:.0}",
+                format!("{:.0}", th.rank.rate).bold(),
+                th.rank.devi * 1.96
+            )
         );
         match rank {
             1 => { println!("{}", entry.truecolor(245, 212, 95)); },

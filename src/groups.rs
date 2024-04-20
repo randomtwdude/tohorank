@@ -1,5 +1,5 @@
 // Character groups for detailed stats
-// Generated from tohosort's dataset: 2019-11-26
+// Generated from tohosort's dataset: 2023-09-24
 
 use serde::{Serialize, Deserialize};
 use std::str::FromStr;
@@ -42,9 +42,9 @@ pub enum Tags {
 	HSiFS,
 	VD,
 	WBaWC,
-	ibun,
+	SFW,
 	UM,
-	BM100,
+	CBM,
 	UDoALG,
 	// Stages
 	st1,
@@ -61,12 +61,12 @@ impl Tags {
 	pub fn name(&self) -> &'static str {
 		match *self {
 			Tags::book	=> "Books and CDs",
-			Tags::HRtP	=> "The Highly Responsive to Prayers",
+			Tags::HRtP	=> "Highly Responsive to Prayers",
 			Tags::SoEW	=> "The Story of Eastern Wonderland",
 			Tags::PoDD	=> "Phantasmagoria of Dim.Dream",
 			Tags::LLS	=> "Lotus Land Story",
 			Tags::MS	=> "Mystic Square",
-			Tags::EoSD	=> "Embodiment of Scarlet Devil",
+			Tags::EoSD	=> "The Embodiment of Scarlet Devil",
 			Tags::PCB	=> "Perfect Cherry Blossom",
 			Tags::IaMP	=> "Immaterial and Missing Power",
 			Tags::IN	=> "Imperishable Night",
@@ -76,7 +76,7 @@ impl Tags {
 			Tags::SWR	=> "Scarlet Weather Rhapsody",
 			Tags::SA	=> "Subterranean Animism",
 			Tags::UFO	=> "Undefined Fantastic Object",
-			Tags::soku	=> "Touhou Hisoutensoku",
+			Tags::soku	=> "Unthinkable Natural Law",
 			Tags::DS	=> "Double Spoiler",
 			Tags::GFW	=> "Great Fairy Wars",
 			Tags::TD	=> "Ten Desires",
@@ -89,9 +89,9 @@ impl Tags {
 			Tags::HSiFS	=> "Hidden Star in Four Seasons",
 			Tags::VD	=> "Violet Detector",
 			Tags::WBaWC	=> "Wily Beast and Weakest Creature",
-			Tags::ibun	=> "Touhou Gouyoku Ibun",
+			Tags::SFW	=> "Sunken Fossil World",
 			Tags::UM	=> "Unconnected Marketeers",
-			Tags::BM100	=> "100th Black Market",
+			Tags::CBM	=> "100th Black Market",
 			Tags::UDoALG	=> "Unfinished Dream of All Living Ghost",
 			// Stages
 			Tags::st1	=> "Stage 1",
@@ -110,9 +110,9 @@ impl Tags {
 			Tags::HRtP	=> "01 - Reiiden",
 			Tags::SoEW	=> "02 - Fuumaroku",
 			Tags::PoDD	=> "03 - Yumejikuu",
-			Tags::LLS	=> "04 - Gensoukyou",
+			Tags::LLS	=> "04 - Gensokyo",
 			Tags::MS	=> "05 - Kaikidan",
-			Tags::EoSD	=> "06 - Koumakan",
+			Tags::EoSD	=> "06 - Koumakyou",
 			Tags::PCB	=> "07 - Youyoumu",
 			Tags::IaMP	=> "07.5 - Suimusou",
 			Tags::IN	=> "08 - Eiyashou",
@@ -135,10 +135,10 @@ impl Tags {
 			Tags::HSiFS	=> "16 - Tenkuushou",
 			Tags::VD	=> "16.5 - Hifuu Nightmare Diary",
 			Tags::WBaWC	=> "17 - Kikeijuu",
-			Tags::ibun	=> "17.5 - Gouyoku Ibun",
+			Tags::SFW	=> "17.5 - Gouyoku Ibun",
 			Tags::UM	=> "18 - Kouryuudou",
-			Tags::BM100	=> "18.5 - Bulletphilia-tachi no Yami-Ichiba",
-			Tags::UDoALG	=> "19 - Unfinished Dream of All Living Ghost",
+			Tags::CBM	=> "18.5 - Black Market of Bulletphilia",
+			Tags::UDoALG	=> "19 - Juuouen",
 			// Stages
 			Tags::st1	=> "",
 			Tags::st2	=> "",
@@ -198,9 +198,9 @@ impl FromStr for Tags {
 			"hsifs"	| "th16"	=> Ok(Tags::HSiFS),
 			"vd"	| "th16.5"	=> Ok(Tags::VD),
 			"wbawc"	| "th17"	=> Ok(Tags::WBaWC),
-			"ibun"	| "th17.5"	=> Ok(Tags::ibun),
+			"sfw"	| "th17.5"	=> Ok(Tags::SFW),
 			"um"	| "th18"	=> Ok(Tags::UM),
-			"bm100"	| "th18.5"	=> Ok(Tags::BM100),
+			"cbm"	| "th18.5"	=> Ok(Tags::CBM),
 			"udoalg"	| "th19"	=> Ok(Tags::UDoALG),
 			// Stages
 			"st1"	=> Ok(Tags::st1),
