@@ -16,7 +16,8 @@ pub fn fight(records: &mut Vec<Match>, fire: &mut Chara, ice: &mut Chara, fire_i
     let mut choice: String = Default::default();
     loop {
         println!("-----------------------------");
-        println!("Battle #{}: {} ({:.0}) vs {} ({:.0})", records.len() + 1, fire.name.bold(), fire.rank.rate, ice.name.bold(), ice.rank.rate);
+        // println!("Battle #{}: {} ({:.0}) vs {} ({:.0})", records.len() + 1, fire.name.bold(), fire.rank.rate, ice.name.bold(), ice.rank.rate);
+        println!("Battle #{}: {} vs {}", records.len() + 1, fire.name.bold(), ice.name.bold());
         print!("Pick [ 'h' for help ] >> ");
         let _ = io::stdout().flush();
         choice.clear();
@@ -85,8 +86,9 @@ pub fn matchmake(rng: &mut ThreadRng, pool: &Vec<&mut Chara>, unranked_picks: &m
     if unranked_pool.peek().is_some() {
         pair_id.push(unranked_pool.choose(rng).unwrap());
     } else {
-        // otherwise just pick someone
-        pair_id.push(rand::seq::index::sample(rng, pool_size, 1).index(0));
+        // otherwise just pick someone, favoring higher rated characters
+        let dist = WeightedIndex::new(pool.iter().map(|a| a.rank.rate)).unwrap();
+        pair_id.push(dist.sample(rng));
     }
 
     // pick the second character, favoring someone with similiar rating
@@ -96,7 +98,7 @@ pub fn matchmake(rng: &mut ThreadRng, pool: &Vec<&mut Chara>, unranked_picks: &m
             scores.push(0.0);                               // don't pick the same person again
         } else {
             let diff = th.rank.rate - pool[pair_id[0]].rank.rate;
-            let s = std::f64::consts::E.powf(diff.abs() / -150.0);// exponential decay
+            let s = std::f64::consts::E.powf(diff.abs() / -135.0);  // exponential decay
             scores.push(s);
         }
     }
