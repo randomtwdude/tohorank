@@ -11,6 +11,8 @@ A Touhou character sorter, based on [charasort](https://github.com/execfera/char
 > Note that, like tohosort, it still takes a while to get representative results, so don't set aside your tea/coffee
 > (Theoretically, tohosort is O(n log n) and as fast as it gets)
 
+- **More options**: Don't know either of the characters or just plain dislike them? You can just say both sides lose instead of being forced to pick ties.
+
 - **Detailed stat tracking**: see where every character stands in various works, historical stats, and more
 <img src="https://github.com/randomtwdude/tohorank/assets/105645765/4b19fe59-89c9-478c-94ea-088bb94066c2" width=500>
 
