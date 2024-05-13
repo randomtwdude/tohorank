@@ -6,7 +6,7 @@ use std::str::FromStr;
 use std::collections::VecDeque;
 use std::fs::File;
 use std::time::SystemTime;
-use std::io::{self, Write, BufRead, BufWriter};
+use std::io::{Write, BufRead, BufReader, BufWriter};
 use std::process;
 use std::path::PathBuf;
 
@@ -80,7 +80,7 @@ pub fn generate_data(data_path: &PathBuf) {
 
     let mut err = false;
     let file = File::open(&touhous_path).unwrap();
-    let reader = io::BufReader::new(file);
+    let reader = BufReader::new(file);
     for (number, line) in reader.lines().skip(3).enumerate() {
         match line {
             Ok(l) => {
@@ -115,7 +115,7 @@ pub fn update_data(touhous: &mut Vec<Chara>, data_path: &PathBuf) {
     touhous_path.push("touhous.txt");
 
     let file = File::open(&touhous_path).unwrap();
-    let reader = io::BufReader::new(file);
+    let reader = BufReader::new(file);
     let (mut updated, mut added) = (0, 0);
     for (_, line) in reader.lines().skip(3).enumerate() {
         match line {

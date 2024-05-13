@@ -20,6 +20,7 @@ mod stats;
 mod data;
 mod chara;
 mod sort;
+mod norm;
 
 // Status returned by fight()
 enum FightCond {
@@ -260,6 +261,15 @@ fn main()
                         }
                         None => { println!("Usage: stat [character]"); },
                     }
+                } else if line.starts_with("n") {
+                    // compare rankings
+                    let everyone = sort::bouncer("".to_string(), &mut touhous).0
+                        .into_iter()
+                        .map(|a| &*a)
+                        .collect();
+                    let list = norm::build(everyone, 0);
+                    println!("Weighted Rank Correlation => {:.3}", norm::wrc_calc(&list));
+                    norm::show_plot(&list);
                 } else if line.starts_with("h") {
                     lobby_help();
                 } else if line.starts_with("reset") {

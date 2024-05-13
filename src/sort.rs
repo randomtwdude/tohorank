@@ -95,7 +95,7 @@ pub fn matchmake(rng: &mut ThreadRng, pool: &Vec<&mut Chara>, unranked_picks: &m
     let mut scores: Vec<f64> = Vec::with_capacity(pool_size - 1);
     for th in pool.iter() {
         if th.name == pool[pair_id[0]].name {
-            scores.push(0.0);                               // don't pick the same person again
+            scores.push(0.0);                                       // don't pick the same person again
         } else {
             let diff = th.rank.rate - pool[pair_id[0]].rank.rate;
             let s = std::f64::consts::E.powf(diff.abs() / -135.0);  // exponential decay
@@ -103,7 +103,7 @@ pub fn matchmake(rng: &mut ThreadRng, pool: &Vec<&mut Chara>, unranked_picks: &m
         }
     }
     let dist = WeightedIndex::new(&scores).unwrap();
-    pair_id.push(dist.sample(rng));                         // weighted random sampling
+    pair_id.push(dist.sample(rng));                                 // weighted random sampling
     pair_id
 }
 
