@@ -268,7 +268,39 @@ fn main()
                         .map(|a| &*a)
                         .collect();
                     let list = norm::build(everyone, 0);
-                    println!("Weighted Rank Correlation => {:.3}", norm::wrc_calc(&list));
+                    let correlation = norm::wrc_calc(&list, 2);
+                    println!("Weighted Rank Correlation = {}",
+                        format!("{:.3}", correlation).bold()
+                    );
+                    println!("The rankings {} {}.\n",
+                        match correlation.abs() {
+                            0.0 => "are ",
+                            1.0 => "perfectly",
+                            0.0..=0.2 => "weakly",
+                            0.2..=0.4 => "",
+                            0.4..=0.6 => "roughly",
+                            0.6..=0.8 => "mostly",
+                            0.8..=1.0 => "strongly",
+                            _ => "make "
+                        },
+                        if correlation == 0.0 {
+                            "not correlated"
+                        } else if correlation.abs() > 1.0 {
+                            "no sense"
+                        } else if correlation < 0.0 {
+                            "disagree"
+                        } else {
+                            "agree"
+                        }
+                    );
+
+                    println!("--- More stats ---");
+                    let correlation_unweighted = norm::wrc_calc(&list, 1);
+                    println!("Unweighted (Spearman's Rho) = {:.3}", correlation_unweighted);
+                    let t_score = correlation
+                        * ((list.len() as f64 - 2.0) / (1.0 - correlation.powf(2.0))).sqrt();
+                    println!("t-score: {:.3}", t_score);
+
                     norm::show_plot(&list);
                 } else if line.starts_with("h") {
                     lobby_help();

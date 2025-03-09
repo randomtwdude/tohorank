@@ -23,7 +23,7 @@ pub fn build(mut touhous: Vec<&Chara>, target: u8)
 -> HashMap<String, (usize, usize)> {
 
     // open the file (just testing for now)
-    let ref_list = File::open("./src/best_taste.txt").expect("Run in src");
+    let ref_list = File::open("./src/best_taste.txt").expect("Secret WIP feature");
 
     let mut list: HashMap<String, (usize, usize)> = HashMap::with_capacity(touhous.len());
 
@@ -62,7 +62,7 @@ pub fn build(mut touhous: Vec<&Chara>, target: u8)
     // recalculate the original ranks
     let mut find = 1;
     let mut replace = 1;
-    let mut found = false;
+    let mut found;
     let mut was_found = true;
 
     while replace <= list.len() {
@@ -85,14 +85,12 @@ pub fn build(mut touhous: Vec<&Chara>, target: u8)
 }
 
 // calculates the Weighted Rank Correlation
-pub fn wrc_calc(list: &HashMap<String, (usize, usize)>)
+// the p-value affacts how aggresive the weighting is
+// a value of 1 turns this into regular Spearman's Rho
+pub fn wrc_calc(list: &HashMap<String, (usize, usize)>, p: u32)
 -> f64 {
 
     let n = list.len();
-
-    // this value affacts how aggresive the weighting is
-    // a value of 1 turns this into regular Spearman's Rho
-    let p = 2;
 
     // kappa
     let kappa = |p: u32| -> f64 {
@@ -129,10 +127,13 @@ pub fn show_plot(list: &HashMap<String, (usize, usize)>) {
     plot.set_domain(Domain(0.0..list.len() as f64))
         .set_codomain(Domain(0.0..list.len() as f64))
         .set_title("Rankings comparison.")
-        .set_x_label("Your ranks")
-        .set_y_label("Target ranks")
+        .set_x_label("X-axis: Your ranks")
+        .set_y_label("Y-axis: Target ranks")
         .set_size(Size::new(160,90))
         .add_plot(Box::new(plot::Bars::new(rank_list)));
 
     println!("{plot}");
+
+    // help text
+    println!("ⓘ The graph appears \"sorted\" if the rankings agree perfectly.\n");
 }

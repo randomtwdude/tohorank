@@ -39,7 +39,6 @@ pub fn fight(records: &mut Vec<Match>, fire: &mut Chara, ice: &mut Chara, fire_i
             println!("Chose - {}!", ice.name.blue());
         } else if choice.starts_with("end") {
             // End
-            println!("Finishing rating period...");
             return FightCond::Last;
         } else if choice.ends_with('d') {
             // I dislike them both! (special value)

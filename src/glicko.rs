@@ -3,18 +3,14 @@
 use crate::{chara, Chara, Match};
 use std::f64::consts::PI;
 use std::collections::HashMap;
+use colored::Colorize;
 
 // Updates all ratings, data::write_data() after use.
 pub fn calc(touhous: &mut Vec<Chara>, records: &Vec<Match>) {
     println!("Tallying {} matches...", records.len());
-    // avoid cluttering the history
-    if records.len() > 0 {
-        chara::update_history(touhous, records);
-    }
 
-    // transform to the glicko-2 scale
-    for th in touhous.iter_mut() {
-        glicko_two_scale(&mut th.rank.rate, &mut th.rank.devi);
+    if records.len() > 0 { // avoid cluttering the history
+        chara::update_history(touhous, records);
     }
 
     // First we need to calculate the quantities v and delta
@@ -27,6 +23,17 @@ pub fn calc(touhous: &mut Vec<Chara>, records: &Vec<Match>) {
         qt_v.insert(battle.two, 0.0);
         qt_d.insert(battle.one, 0.0);
         qt_d.insert(battle.two, 0.0);
+    }
+
+    // save old ratings of battled characters
+    let mut old_ratings: HashMap<usize, f64> = HashMap::new();
+    for th in qt_v.keys() {
+        old_ratings.insert(*th, touhous[*th].rank.rate);
+    }
+
+    // transform to the glicko-2 scale
+    for th in touhous.iter_mut() {
+        glicko_two_scale(&mut th.rank.rate, &mut th.rank.devi);
     }
 
     for battle in records.iter() {
@@ -120,6 +127,27 @@ pub fn calc(touhous: &mut Vec<Chara>, records: &Vec<Match>) {
     for th in touhous.iter_mut() {
         glicko_one_scale(&mut th.rank.rate, &mut th.rank.devi);
     }
+
+    // display changes
+    println!("----- Changes -----");
+    let mut diffs: Vec<(usize, f64)> = old_ratings
+        .iter()
+        .map(|(id, old_rt)| (*id, touhous[*id].rank.rate - old_rt))
+        .collect();
+    diffs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+
+    for (th, diff) in diffs {
+        println!("{:<26}| {:<5} | {}",
+            touhous[th].name,
+            format!("{:.0}", touhous[th].rank.rate),
+            if diff > 0.0 {
+                format!("{:.0}", diff).blue()
+            } else {
+                format!("{:.0}", diff).red()
+            }
+        );
+    }
+    println!("-------------------");
 }
 
 // convert from glicko to glicko-2
