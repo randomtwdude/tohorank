@@ -1,4 +1,4 @@
-// Functions for manipulating the data file
+// Tohorank: interface with the data file
 
 use crate::{chara, Chara, Glicko, Past, groups::Tags};
 use std::collections::HashSet;

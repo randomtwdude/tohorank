@@ -1,4 +1,4 @@
-// Functions relating to characters
+// Tohorank: characters functions
 
 use crate::{Chara, Glicko, Past, Match, data};
 use std::collections::VecDeque;

@@ -1,4 +1,4 @@
-// Glicko-2 rating system
+// TOhorank: Glicko-2 rating system
 
 use crate::{chara, Chara, Match};
 use std::f64::consts::PI;

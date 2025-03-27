@@ -1,4 +1,4 @@
-// Functions about the sorting
+// Tohorank: actual ranking and sorting
 
 use crate::{Match, Chara, FightCond, groups::Tags, stats};
 use std::io::{self, Write};

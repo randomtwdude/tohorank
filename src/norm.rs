@@ -1,4 +1,4 @@
-// Functions about the ranking comparisons
+// Tohorank: ranking comparisons
 
 // Implemented here is a modification of the Spearman's rank correlation
 // with weights, biased towards the top of the list.
@@ -19,7 +19,7 @@ use crate::Chara;
 // Build the list containing the characters (sorted by rank)
 // and their ranks in the target rankings (to be compared to)
 // target does nothing for now
-pub fn build(mut touhous: Vec<&Chara>, target: u8)
+pub fn build(mut touhous: Vec<&Chara>, _target: u8)
 -> HashMap<String, (usize, usize)> {
 
     // open the file (just testing for now)

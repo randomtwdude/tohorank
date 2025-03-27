@@ -1,4 +1,4 @@
-// Functions for the statistics feature
+// Tohorank: statistics helpers
 
 use crate::{Chara, Tags};
 use colored::Colorize;
